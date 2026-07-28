@@ -6,6 +6,7 @@ Available in English and Thai — use the TH / EN switch in the header.
 By TESR Co., Ltd. — Thai Embedded Systems and Robotics
 
 **Open it:** https://tesr-channel.github.io/AI_ROI_Designer/
+
 **Offline:** download `index.html` and double-click it. Nothing to install, no server, and no image or model ever leaves the machine.
 
 ### What it does
