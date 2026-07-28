@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TESR ROI Studio — ตีกรอบ ROI สำหรับ Edge AI Vision</title>
-<meta name="description" content="TESR ROI Studio — ตีกรอบ ROI หลายจุดต่อกล้อง อ่านตัวเลขจอเครื่องจักร OCR บาร์โค้ด และโมเดล YOLO ของคุณเอง แล้วส่งออกเป็น Python ที่รันได้บน Raspberry Pi และ Jetson">
+<title>TESR ROI Studio — Draw ROIs for Edge AI Vision</title>
+<meta name="description" content="Draw multiple ROIs per camera, read machine-panel digits, OCR, barcodes and your own YOLO models, then export Python that runs on Raspberry Pi and Jetson.">
 <meta name="theme-color" content="#101010">
 <meta property="og:type" content="website">
 <meta property="og:title" content="TESR ROI Studio">
-<meta property="og:description" content="ตีกรอบ ROI บนภาพหรือกล้องสด อ่านค่าได้ทันทีในเบราว์เซอร์ แล้วส่งออกเป็น config + Python ที่รันได้บน Edge Device">
+<meta property="og:description" content="Draw ROIs on a photo or a live camera, read values right in the browser, then export config + Python for your edge device.">
 <link rel="icon" href="data:image/png;base64,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">
 <link rel="apple-touch-icon" href="data:image/png;base64,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">
 <!-- Kanit is the TESR brand face. If the page is opened offline the stack falls back cleanly. -->
@@ -185,12 +185,16 @@
     <span class="t2">Thai Embedded Systems &amp; Robotics · v1.0</span>
   </div>
   <div class="rule"></div>
-  <input class="proj" id="projName" value="TESR Vision Project" aria-label="ชื่อโปรเจกต์">
+  <input class="proj" id="projName" value="TESR Vision Project" data-i18n-aria="projectName">
   <div class="grow"></div>
-  <button id="btnImport">นำเข้า config</button>
-  <button id="btnRuntime">ตั้งค่า Runtime</button>
-  <button id="btnJson">ดู JSON</button>
-  <button id="btnPy" class="primary">ส่งออก config + Python</button>
+  <div class="seg" role="group" aria-label="Language">
+    <button id="langTh">ไทย</button>
+    <button id="langEn">EN</button>
+  </div>
+  <button id="btnImport" data-i18n="importConfig"></button>
+  <button id="btnRuntime" data-i18n="runtimeSettings"></button>
+  <button id="btnJson" data-i18n="viewJson"></button>
+  <button id="btnPy" class="primary" data-i18n="exportBtn"></button>
   <input type="file" id="fileImport" accept="application/json" hidden>
 </header>
 
@@ -198,59 +202,55 @@
   <!-- ================= LEFT : cameras ================= -->
   <aside class="left">
     <div class="sec">
-      <h3>กล้อง / จุดติดตั้ง <span class="tag" id="camCount">0</span></h3>
+      <h3><span data-i18n="camerasTitle"></span> <span class="tag" id="camCount">0</span></h3>
       <div class="body">
         <div class="list" id="camList"></div>
-        <button id="btnAddCam">+ เพิ่มกล้อง</button>
+        <button id="btnAddCam" data-i18n="addCamera"></button>
       </div>
     </div>
 
     <div class="sec">
-      <h3>ตั้งค่ากล้องที่เลือก</h3>
+      <h3><span data-i18n="cameraSettings"></span></h3>
       <div class="body" id="camProps">
-        <div><label>ชื่อกล้อง</label><input id="camName"></div>
-        <div><label>Camera ID (ใช้ใน MQTT/log)</label><input id="camId"></div>
+        <div><label data-i18n="cameraName"></label><input id="camName"></div>
+        <div><label data-i18n="cameraId"></label><input id="camId"></div>
         <div>
           <label>Source</label>
-          <input id="camSource" placeholder="0 หรือ rtsp://user:pass@ip:554/stream">
-          <div class="hint">0,1,2 = USB/CSI · rtsp:// = IP camera · ไฟล์ .mp4 / .jpg ก็ได้</div>
+          <input id="camSource" data-i18n-ph="sourcePh">
+          <div class="hint" data-i18n="sourceHint"></div>
         </div>
         <div class="row">
           <div><label>Width</label><input id="camW" type="number" min="0" step="1"></div>
           <div><label>Height</label><input id="camH" type="number" min="0" step="1"></div>
         </div>
-        <div><label>หมุนภาพก่อนประมวลผล</label>
+        <div><label data-i18n="rotateBefore"></label>
           <select id="camRot"><option value="0">0°</option><option value="90">90°</option>
           <option value="180">180°</option><option value="270">270°</option></select></div>
       </div>
     </div>
 
     <div class="sec">
-      <h3>โมเดลของฉัน <span class="tag" id="modelCount">0</span></h3>
+      <h3><span data-i18n="myModels"></span> <span class="tag" id="modelCount">0</span></h3>
       <div class="body">
         <div class="list" id="modelList"></div>
-        <button id="btnAddModel">+ เพิ่มโมเดลที่เทรนแล้ว</button>
-        <div class="hint">รองรับไฟล์ <b>.onnx</b> ที่ export จาก Ultralytics<br>
-          <span class="kbd">yolo export model=best.pt format=onnx opset=12</span></div>
-        <div class="hint" id="ortStatus">เอนจิน ONNX จะถูกโหลดเมื่อใช้งานครั้งแรก</div>
+        <button id="btnAddModel" data-i18n="addModel"></button>
+        <div class="hint" data-i18n-html="modelHint"></div>
+        <div class="hint" id="ortStatus" data-i18n="ortIdle"></div>
       </div>
     </div>
 
     <div class="sec">
-      <h3>ภาพอ้างอิง</h3>
+      <h3><span data-i18n="referenceImage"></span></h3>
       <div class="body">
-        <button id="btnFile">โหลดรูปจากเครื่อง</button>
-        <div class="hint">ต้องการภาพจากกล้อง? สลับไปโหมด <b>กล้องสด</b> ด้านบน แล้วกด
-          <b>จับเป็นภาพนิ่ง</b> เมื่อได้มุมที่ต้องการ</div>
-        <div><label>หรือดึงจาก URL ภาพ</label>
+        <button id="btnFile" data-i18n="loadImage"></button>
+        <div class="hint" data-i18n-html="wantCameraHint"></div>
+        <div><label data-i18n="orFromUrl"></label>
           <div class="row"><input id="urlInput" placeholder="http://ip/snapshot.jpg">
-          <button id="btnUrl" style="flex:0 0 auto">ดึง</button></div></div>
+          <button id="btnUrl" style="flex:0 0 auto" data-i18n="fetchBtn"></button></div></div>
         <input type="file" id="fileImage" accept="image/*" hidden>
-        <div class="hint">ลากไฟล์ภาพมาวางบนพื้นที่ทำงาน หรือกด <span class="kbd">Ctrl</span>+<span class="kbd">V</span> วางภาพก็ได้</div>
-        <div class="hint" id="fileProtoNote" style="display:none;color:var(--tesr-gold)">
-          เบราว์เซอร์นี้ไม่เปิดสิทธิ์กล้องให้ ลองใช้ Chrome หรือ Edge<br>
-          ระหว่างนี้ใช้วิธีโหลดรูป ลากไฟล์ หรือกด Ctrl+V ได้ตามปกติ
-        </div>
+        <div class="hint" data-i18n-html="dropHint"></div>
+        <div class="hint" id="fileProtoNote" style="display:none;color:var(--tesr-gold)"
+             data-i18n-html="noCameraApi"></div>
       </div>
     </div>
   </aside>
@@ -258,42 +258,41 @@
   <!-- ================= CENTER : canvas ================= -->
   <section class="stage">
     <div class="toolbar">
-      <div class="seg" role="group" aria-label="โหมดแสดงผล">
-        <button id="modeSnap" class="on">ภาพนิ่ง</button>
-        <button id="modeLive">กล้องสด</button>
+      <div class="seg" role="group" data-i18n-aria="displayMode">
+        <button id="modeSnap" class="on" data-i18n="modeStill"></button>
+        <button id="modeLive" data-i18n="modeLive"></button>
       </div>
-      <select id="liveDevice" style="width:150px;display:none" title="เลือกกล้อง"></select>
-      <button id="btnFreeze" style="display:none">จับเป็นภาพนิ่ง</button>
+      <select id="liveDevice" style="width:150px;display:none" data-i18n-title="chooseCamera"></select>
+      <button id="btnFreeze" style="display:none" data-i18n="freezeBtn"></button>
       <label id="liveInferWrap" style="margin:0;display:none;gap:5px;align-items:center;
              text-transform:none;letter-spacing:0;font-size:11px">
-        <input type="checkbox" id="chkLiveInfer" checked> อ่านค่าสด</label>
+        <input type="checkbox" id="chkLiveInfer" checked> <span data-i18n="readLive"></span></label>
       <span style="width:1px;height:20px;background:var(--line)"></span>
-      <select id="newTask" title="ชนิดงานของกรอบใหม่" style="width:180px"></select>
-      <button id="btnFit">พอดีจอ</button>
+      <select id="newTask" data-i18n-title="newRoiTask" style="width:180px"></select>
+      <button id="btnFit" data-i18n="fitScreen"></button>
       <button id="btnZoomIn">+</button>
       <button id="btnZoomOut">−</button>
-      <button id="btnDup">ทำซ้ำกรอบ</button>
-      <button id="btnDel">ลบกรอบ</button>
+      <button id="btnDup" data-i18n="duplicateRoi"></button>
+      <button id="btnDel" data-i18n="deleteRoi"></button>
       <div class="grow" style="flex:1"></div>
       <label style="margin:0;display:flex;gap:5px;align-items:center;text-transform:none;letter-spacing:0;font-size:11px">
-        <input type="checkbox" id="chkGuide" checked> เส้นแบ่งหลักเลข</label>
+        <input type="checkbox" id="chkGuide" checked> <span data-i18n="digitGuides"></span></label>
       <label style="margin:0;display:flex;gap:5px;align-items:center;text-transform:none;letter-spacing:0;font-size:11px">
-        <input type="checkbox" id="chkLabels" checked> ชื่อกรอบ</label>
+        <input type="checkbox" id="chkLabels" checked> <span data-i18n="roiLabels"></span></label>
     </div>
     <div class="canvas-wrap" id="wrap">
       <canvas id="view"></canvas>
       <video id="liveVideo" playsinline muted style="display:none"></video>
       <div class="empty" id="emptyMsg">
-        <b>ยังไม่มีภาพอ้างอิง</b>
-        <div>โหลดรูปหน้างาน · จับภาพจากกล้อง · หรือลากไฟล์มาวางตรงนี้<br>
-        แล้วลากเมาส์เพื่อ<b> ตีกรอบ ROI </b>ได้หลายจุดตามต้องการ</div>
+        <b data-i18n="noImageTitle"></b>
+        <div data-i18n-html="noImageBody"></div>
       </div>
     </div>
     <div class="statusbar">
-      <span>ภาพ <b id="stSize">—</b></span>
-      <span>เคอร์เซอร์ <b id="stCur">—</b></span>
-      <span>กรอบ <b id="stCount">0</b></span>
-      <span id="stHint">ลากเมาส์ = สร้างกรอบ · ลากขอบ = ปรับขนาด · จุดบน = หมุน · Del = ลบ · ล้อเมาส์ = ซูม</span>
+      <span><span data-i18n="stImage"></span> <b id="stSize">—</b></span>
+      <span><span data-i18n="stCursor"></span> <b id="stCur">—</b></span>
+      <span><span data-i18n="stRois"></span> <b id="stCount">0</b></span>
+      <span id="stHint" data-i18n="stHint"></span>
       <span style="margin-left:auto;color:var(--tesr-gold-deep);letter-spacing:.14em">TESR CO., LTD.</span>
     </div>
   </section>
@@ -301,23 +300,24 @@
   <!-- ================= RIGHT : ROI props ================= -->
   <aside class="right">
     <div class="sec">
-      <h3>รายการ ROI <span class="tag" id="roiCount">0</span></h3>
+      <h3><span data-i18n="roiList"></span> <span class="tag" id="roiCount">0</span></h3>
       <div class="body"><div class="list" id="roiList"></div>
-        <div class="hint" id="roiEmptyHint">ลากเมาส์บนภาพเพื่อสร้างกรอบแรก</div></div>
+        <div class="hint" id="roiEmptyHint" data-i18n="roiEmptyHint"></div></div>
     </div>
 
     <div class="sec" id="roiPanel" style="display:none">
-      <h3>คุณสมบัติของกรอบ <span class="tag" id="roiIdTag"></span></h3>
+      <h3><span data-i18n="roiProps"></span> <span class="tag" id="roiIdTag"></span></h3>
       <div class="body">
         <div class="row">
-          <div style="flex:2"><label>ชื่อ</label><input id="pName"></div>
-          <div><label>ใช้งาน</label><select id="pEnabled"><option value="1">เปิด</option><option value="0">ปิด</option></select></div>
+          <div style="flex:2"><label data-i18n="fieldName"></label><input id="pName"></div>
+          <div><label data-i18n="fieldEnabled"></label><select id="pEnabled">
+            <option value="1" data-i18n="on"></option><option value="0" data-i18n="off"></option></select></div>
         </div>
-        <div><label>ชนิดงาน (task)</label><select id="pTask"></select></div>
-        <div><label>Output key ที่ส่งออก</label><input id="pKey"></div>
+        <div><label data-i18n="fieldTask"></label><select id="pTask"></select></div>
+        <div><label data-i18n="fieldOutputKey"></label><input id="pKey"></div>
         <div class="row">
-          <div><label>ยืนยันค่าซ้ำ (เฟรม)</label><input id="pStable" type="number" min="1" step="1"></div>
-          <div><label>ประมวลผลทุก N เฟรม</label><input id="pEvery" type="number" min="1" step="1"></div>
+          <div><label data-i18n="fieldStable"></label><input id="pStable" type="number" min="1" step="1"></div>
+          <div><label data-i18n="fieldEvery"></label><input id="pEvery" type="number" min="1" step="1"></div>
         </div>
         <div class="row">
           <div><label>X %</label><input id="pX" type="number" step="0.1"></div>
@@ -326,34 +326,33 @@
         <div class="row">
           <div><label>W %</label><input id="pW" type="number" step="0.1"></div>
           <div><label>H %</label><input id="pH" type="number" step="0.1"></div>
-          <div><label>มุม °</label><input id="pA" type="number" step="0.5"></div>
+          <div><label data-i18n="fieldAngle"></label><input id="pA" type="number" step="0.5"></div>
         </div>
         <div id="taskParams" style="display:flex;flex-direction:column;gap:9px"></div>
       </div>
     </div>
 
     <div class="sec" id="diagSec" style="display:none">
-      <h3>ตรวจสอบความแม่นยำ <span class="tag" id="diagBand"></span></h3>
+      <h3><span data-i18n="accuracyCheck"></span> <span class="tag" id="diagBand"></span></h3>
       <div class="body">
         <div class="row">
-          <button id="btnAutoTune" class="primary">ปรับอัตโนมัติ</button>
-          <button id="btnDiag">ตรวจอย่างเดียว</button>
+          <button id="btnAutoTune" class="primary" data-i18n="autoTune"></button>
+          <button id="btnDiag" data-i18n="diagnoseOnly"></button>
         </div>
         <div class="diag" id="diagList"></div>
       </div>
     </div>
 
     <div class="sec" id="previewSec" style="display:none">
-      <h3>ทดลองอ่านในเบราว์เซอร์ <span class="tag">ประมาณการ</span></h3>
+      <h3><span data-i18n="tryInBrowser"></span> <span class="tag" data-i18n="estimate"></span></h3>
       <div class="body">
-        <button id="btnTestRoi" class="primary">ทดสอบเลย</button>
+        <button id="btnTestRoi" class="primary" data-i18n="testNow"></button>
         <div class="preview">
           <canvas id="pvCrop" height="90"></canvas>
           <canvas id="pvBin" height="90"></canvas>
           <div class="readout"><span id="pvValue">—</span><small id="pvConf"></small></div>
         </div>
-        <div class="hint">ผลนี้คำนวณด้วย JavaScript เพื่อช่วยจูนพารามิเตอร์เท่านั้น
-          ค่าจริงให้ยืนยันด้วย Python บนเครื่องปลายทางเสมอ</div>
+        <div class="hint" data-i18n="previewDisclaimer"></div>
       </div>
     </div>
   </aside>
@@ -363,64 +362,66 @@
   <div class="dhead">
     <h2 id="dlgTitle">Config</h2>
     <div style="flex:1"></div>
-    <button id="dlgCopy">คัดลอก</button>
-    <button id="dlgClose" class="ghost">ปิด</button>
+    <button id="dlgCopy" data-i18n="copy"></button>
+    <button id="dlgClose" class="ghost" data-i18n="close"></button>
   </div>
   <div class="dbody"><pre id="dlgBody"></pre></div>
 </dialog>
 
 <dialog id="dlgModel">
-  <div class="dhead"><h2>เพิ่มโมเดล</h2><div style="flex:1"></div>
-    <button id="mdSave" class="primary">บันทึกโมเดล</button>
-    <button id="mdCancel" class="ghost">ยกเลิก</button></div>
+  <div class="dhead"><h2 data-i18n="addModelTitle"></h2><div style="flex:1"></div>
+    <button id="mdSave" class="primary" data-i18n="saveModel"></button>
+    <button id="mdCancel" class="ghost" data-i18n="cancel"></button></div>
   <div class="dbody">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div style="grid-column:1/-1">
-        <label>ไฟล์โมเดล (.onnx)</label>
+        <label data-i18n="modelFile"></label>
         <input type="file" id="mdFile" accept=".onnx">
-        <div class="hint" id="mdFileInfo">ยังไม่ได้เลือกไฟล์</div>
+        <div class="hint" id="mdFileInfo" data-i18n="noFileChosen"></div>
       </div>
-      <div><label>ชื่อเรียก</label><input id="mdName" placeholder="เช่น defect_v3"></div>
-      <div><label>ชนิด</label><select id="mdType">
+      <div><label data-i18n="modelNick"></label><input id="mdName" data-i18n-ph="modelNickPh"></div>
+      <div><label data-i18n="modelKind"></label><select id="mdType">
         <option value="detect">Object Detection</option>
         <option value="classify">Image Classification</option></select></div>
-      <div><label>ขนาด input (imgsz)</label><input id="mdSize" type="number" value="640" step="32"></div>
-      <div><label>ชื่อไฟล์ตอน deploy บน Python</label><input id="mdDeploy" placeholder="best.onnx"></div>
+      <div><label data-i18n="modelSize"></label><input id="mdSize" type="number" value="640" step="32"></div>
+      <div><label data-i18n="modelDeployName"></label><input id="mdDeploy" placeholder="best.onnx"></div>
       <div><label>conf</label><input id="mdConf" type="number" value="0.25" min="0" max="1" step="0.05"></div>
       <div><label>iou</label><input id="mdIou" type="number" value="0.45" min="0" max="1" step="0.05"></div>
       <div style="grid-column:1/-1">
-        <label>ชื่อคลาส (บรรทัดละ 1 ชื่อ หรือคั่นด้วยจุลภาค ตามลำดับ index)</label>
+        <label data-i18n="classNames"></label>
         <textarea id="mdClasses" rows="4" placeholder="ok&#10;ng&#10;missing"></textarea>
-        <div class="hint">ถ้าเว้นว่าง จะแสดงเป็นเลข index แทน · วางเนื้อหาจากช่อง <b>names</b> ใน data.yaml ได้เลย</div>
+        <div class="hint" data-i18n-html="classNamesHint"></div>
       </div>
     </div>
-    <div class="hint" style="margin-top:12px">
-      โมเดลถูกเก็บไว้ในเบราว์เซอร์ของเครื่องนี้เท่านั้น ไม่มีการอัปโหลดไปที่ใด<br>
-      ตอนกดส่งออก config ระบบจะใส่ชื่อไฟล์โมเดลลงใน config ให้ แต่ไฟล์ .onnx ต้องคัดลอกไปวางข้าง ๆ
-      <span class="kbd">tesr_vision_runner.py</span> เอง
-    </div>
+    <div class="hint" style="margin-top:12px" data-i18n-html="modelPrivacy"></div>
   </div>
 </dialog>
 
 <dialog id="dlgRt">
-  <div class="dhead"><h2>Runtime</h2><div style="flex:1"></div><button id="rtClose" class="primary">เสร็จ</button></div>
+  <div class="dhead"><h2>Runtime</h2><div style="flex:1"></div>
+    <button id="rtClose" class="primary" data-i18n="done"></button></div>
   <div class="dbody">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div><label>Loop FPS สูงสุด</label><input id="rtFps" type="number" min="1" step="1"></div>
-      <div><label>แสดงหน้าต่างภาพ</label><select id="rtShow"><option value="1">แสดง</option><option value="0">ไม่แสดง (headless)</option></select></div>
-      <div><label>บันทึก CSV</label><input id="rtCsv" placeholder="logs/results.csv"></div>
-      <div><label>บันทึก JSONL</label><input id="rtJsonl" placeholder="logs/results.jsonl"></div>
-      <div><label>เก็บภาพเมื่อค่าเปลี่ยน</label><select id="rtSave"><option value="0">ไม่เก็บ</option><option value="1">เก็บ</option></select></div>
-      <div><label>โฟลเดอร์เก็บภาพ</label><input id="rtSaveDir" placeholder="captures"></div>
-      <div><label>MQTT</label><select id="rtMqtt"><option value="0">ปิด</option><option value="1">เปิด</option></select></div>
+      <div><label data-i18n="rtFps"></label><input id="rtFps" type="number" min="1" step="1"></div>
+      <div><label data-i18n="rtShow"></label><select id="rtShow">
+        <option value="1" data-i18n="rtShowYes"></option>
+        <option value="0" data-i18n="rtShowNo"></option></select></div>
+      <div><label data-i18n="rtCsv"></label><input id="rtCsv" placeholder="logs/results.csv"></div>
+      <div><label data-i18n="rtJsonl"></label><input id="rtJsonl" placeholder="logs/results.jsonl"></div>
+      <div><label data-i18n="rtSave"></label><select id="rtSave">
+        <option value="0" data-i18n="rtSaveNo"></option>
+        <option value="1" data-i18n="rtSaveYes"></option></select></div>
+      <div><label data-i18n="rtSaveDir"></label><input id="rtSaveDir" placeholder="captures"></div>
+      <div><label>MQTT</label><select id="rtMqtt">
+        <option value="0" data-i18n="off"></option><option value="1" data-i18n="on"></option></select></div>
       <div><label>MQTT host</label><input id="rtHost" placeholder="192.168.1.10"></div>
       <div><label>MQTT port</label><input id="rtPort" type="number"></div>
       <div><label>Topic prefix</label><input id="rtTopic" placeholder="tesr/vision"></div>
-      <div><label>Webhook (HTTP POST)</label><select id="rtWh"><option value="0">ปิด</option><option value="1">เปิด</option></select></div>
+      <div><label>Webhook (HTTP POST)</label><select id="rtWh">
+        <option value="0" data-i18n="off"></option><option value="1" data-i18n="on"></option></select></div>
       <div><label>Webhook URL</label><input id="rtWhUrl" placeholder="http://server/api/vision"></div>
     </div>
-    <p class="hint" style="margin-top:12px">ค่าเหล่านี้ถูกเขียนลงใน config.json และอ่านโดย tesr_vision_runner.py
-      สั่งงานตอนรันทับได้ด้วย <span class="kbd">--headless</span> <span class="kbd">--test</span></p>
+    <p class="hint" style="margin-top:12px" data-i18n-html="rtNote"></p>
   </div>
 </dialog>
 
@@ -1924,6 +1925,361 @@ if __name__ == "__main__":
 
 <script>
 "use strict";
+
+const I18N = {
+th: {
+  /* header + chrome */
+  projectName:"ชื่อโปรเจกต์", importConfig:"นำเข้า config", runtimeSettings:"ตั้งค่า Runtime",
+  viewJson:"ดู JSON", exportBtn:"ส่งออก config + Python",
+
+  /* cameras */
+  camerasTitle:"กล้อง / จุดติดตั้ง", addCamera:"+ เพิ่มกล้อง", cameraSettings:"ตั้งค่ากล้องที่เลือก",
+  cameraName:"ชื่อกล้อง", cameraId:"Camera ID (ใช้ใน MQTT/log)",
+  sourcePh:"0 หรือ rtsp://user:pass@ip:554/stream",
+  sourceHint:"0,1,2 = USB/CSI · rtsp:// = IP camera · ไฟล์ .mp4 / .jpg ก็ได้",
+  rotateBefore:"หมุนภาพก่อนประมวลผล",
+
+  /* models */
+  myModels:"โมเดลของฉัน", addModel:"+ เพิ่มโมเดลที่เทรนแล้ว",
+  modelHint:'รองรับไฟล์ <b>.onnx</b> ที่ export จาก Ultralytics<br><span class="kbd">yolo export model=best.pt format=onnx opset=12</span>',
+  ortIdle:"เอนจิน ONNX จะถูกโหลดเมื่อใช้งานครั้งแรก",
+  ortLoading:"กำลังโหลดเอนจิน ONNX …", ortReady:"เอนจิน ONNX พร้อมใช้งาน",
+  ortFailed:"โหลดเอนจิน ONNX ไม่ได้ (ออฟไลน์?)", ortTimeout:"โหลดเอนจิน ONNX ไม่สำเร็จ (หมดเวลารอ)",
+  ortErr:"โหลดเอนจิน ONNX ไม่สำเร็จ — เครื่องนี้อาจไม่ได้ต่ออินเทอร์เน็ต",
+  ortErrTimeout:"โหลดเอนจิน ONNX ไม่สำเร็จ — หมดเวลารอ ตรวจการเชื่อมต่ออินเทอร์เน็ต",
+  ocrErr:"โหลดเอนจิน OCR ไม่สำเร็จ — ต้องต่ออินเทอร์เน็ตครั้งแรก",
+  ocrErrTimeout:"โหลดเอนจิน OCR ไม่สำเร็จ — หมดเวลารอ ตรวจการเชื่อมต่ออินเทอร์เน็ต",
+
+  /* reference image */
+  referenceImage:"ภาพอ้างอิง", loadImage:"โหลดรูปจากเครื่อง",
+  wantCameraHint:"ต้องการภาพจากกล้อง? สลับไปโหมด <b>กล้องสด</b> ด้านบน แล้วกด <b>จับเป็นภาพนิ่ง</b> เมื่อได้มุมที่ต้องการ",
+  orFromUrl:"หรือดึงจาก URL ภาพ", fetchBtn:"ดึง",
+  dropHint:'ลากไฟล์ภาพมาวางบนพื้นที่ทำงาน หรือกด <span class="kbd">Ctrl</span>+<span class="kbd">V</span> วางภาพก็ได้',
+  noCameraApi:"เบราว์เซอร์นี้ไม่เปิดสิทธิ์กล้องให้ ลองใช้ Chrome หรือ Edge<br>ระหว่างนี้ใช้วิธีโหลดรูป ลากไฟล์ หรือกด Ctrl+V ได้ตามปกติ",
+
+  /* toolbar */
+  displayMode:"โหมดแสดงผล", modeStill:"ภาพนิ่ง", modeLive:"กล้องสด",
+  chooseCamera:"เลือกกล้อง", freezeBtn:"จับเป็นภาพนิ่ง", readLive:"อ่านค่าสด",
+  newRoiTask:"ชนิดงานของกรอบใหม่", fitScreen:"พอดีจอ",
+  duplicateRoi:"ทำซ้ำกรอบ", deleteRoi:"ลบกรอบ",
+  digitGuides:"เส้นแบ่งหลักเลข", roiLabels:"ชื่อกรอบ",
+
+  /* canvas + status */
+  noImageTitle:"ยังไม่มีภาพอ้างอิง",
+  noImageBody:"โหลดรูปหน้างาน · จับภาพจากกล้อง · หรือลากไฟล์มาวางตรงนี้<br>แล้วลากเมาส์เพื่อ<b> ตีกรอบ ROI </b>ได้หลายจุดตามต้องการ",
+  stImage:"ภาพ", stCursor:"เคอร์เซอร์", stRois:"กรอบ", live:"สด",
+  stHint:"ลากเมาส์ = สร้างกรอบ · ลากขอบ = ปรับขนาด · จุดบน = หมุน · Del = ลบ · ล้อเมาส์ = ซูม",
+
+  /* ROI panel */
+  roiList:"รายการ ROI", roiEmptyHint:"ลากเมาส์บนภาพเพื่อสร้างกรอบแรก",
+  roiProps:"คุณสมบัติของกรอบ", fieldName:"ชื่อ", fieldEnabled:"ใช้งาน", on:"เปิด", off:"ปิด",
+  fieldTask:"ชนิดงาน (task)", fieldOutputKey:"Output key ที่ส่งออก",
+  fieldStable:"ยืนยันค่าซ้ำ (เฟรม)", fieldEvery:"ประมวลผลทุก N เฟรม", fieldAngle:"มุม °",
+
+  /* tasks */
+  task_digits_7seg:"อ่านตัวเลข 7-segment / LCD", task_ocr_text:"OCR ข้อความ",
+  task_yolo_detect:"YOLO ตรวจจับวัตถุ", task_yolo_classify:"YOLO จำแนกภาพ",
+  task_barcode_qr:"Barcode / QR", task_presence_diff:"ตรวจการเปลี่ยนแปลง / มีของ",
+  task_color_check:"ตรวจสี (ไฟสถานะ)",
+
+  /* task params */
+  pDigits:"จำนวนหลักในกรอบนี้", pDecimals:"ทศนิยม",
+  digitsHint:"เริ่มต้นที่ <b>1 หลัก</b> — กรอบละหลักคือวิธีที่ทนแสงและมุมกล้องได้ดีที่สุด ถ้าอยากอ่านทั้งชุดในกรอบเดียว ให้ตั้งเป็นจำนวนหลักจริง เช่น 4",
+  pSplit:"แบ่งหลัก", splitAuto:"อัตโนมัติ", splitFixed:"แบ่งเท่ากัน",
+  pPolarity:"ตัวเลขสว่าง", polLight:"สว่างบนพื้นมืด", polDark:"มืดบนพื้นสว่าง",
+  pThreshold:"Threshold", thrOtsu:"otsu (อัตโนมัติ)", pThresholdVal:"ค่า fixed",
+  pBlur:"Blur", pMinFill:"min_fill", pUpscale:"ขยายสูง px",
+  pUnit:"หน่วย", pAsNumber:"แปลงเป็นตัวเลข", yes:"ใช่", no:"ไม่",
+  pEngine:"Engine", pLang:"ภาษา", pWhitelist:"Whitelist",
+  pPreprocess:"Preprocess", pInvert:"Invert", enabled:"เปิด", disabled:"ปิด",
+  pModelUse:"โมเดลที่ใช้", pickModel:"— เลือกโมเดล —", noModelYet:"— ยังไม่มีโมเดล กด + เพิ่มโมเดล —",
+  classesCount:"คลาส", pOutput:"ค่าที่ส่งออก", outCount:"จำนวนที่เจอ", outClasses:"รายชื่อคลาส",
+  outItems:"รายละเอียดทั้งหมด", pFilterClasses:"กรองเฉพาะคลาส",
+  filterPh:"เว้นว่าง = ทุกคลาส เช่น person,helmet", pDeployName:"ชื่อไฟล์โมเดลตอน deploy",
+  pReadQr:"อ่าน QR", pReadBarcode:"อ่านบาร์โค้ดแท่ง",
+  barcodeFormats:"รองรับ QR · Code 128 · Code 39 · EAN-13 · UPC-A · EAN-8 · ITF<br>ทุกฟอร์แมตตรวจ checksum ก่อนตอบ จึงมักจะ<b>อ่านไม่เจอ</b> มากกว่า<b>อ่านผิด</b><br>วางกรอบให้คลุมทั้งบาร์โค้ดรวมขอบขาวซ้ายขวา และให้แท่งตั้งตรง (เอียงได้ราว 8°)",
+  pSensitivity:"Sensitivity", pMinRatio:"min_ratio", pReference:"ภาพอ้างอิง",
+  refFirst:"เฟรมแรก", refPrev:"เฟรมก่อนหน้า",
+  pOutputAs:"ส่งออกเป็น", outBool:"จริง/เท็จ", outRatio:"สัดส่วนพื้นที่",
+
+  /* diagnostics */
+  accuracyCheck:"ตรวจสอบความแม่นยำ", autoTune:"ปรับอัตโนมัติ", autoTuning:"กำลังไล่ค่า …",
+  diagnoseOnly:"ตรวจอย่างเดียว",
+  needImage:"ต้องมีภาพอ้างอิงหรือกล้องสดก่อน",
+  tuneFailed:"ปรับอัตโนมัติล้มเหลว: ", tuneNone:"ไม่สำเร็จ",
+  tuneNoBand:"หาค่าที่อ่านได้คงที่ไม่เจอเลย",
+  tuneNoBandFix:"ภาพนี้ยังไม่ดีพอสำหรับการอ่านอัตโนมัติ แก้ที่หน้างานก่อนตามรายการด้านล่าง",
+  bandHigh:"กว้าง ทนแสงเปลี่ยนได้ดี", bandMed:"พอใช้", bandLow:"แคบ เสี่ยงพลิกค่า", bandNone:"ไม่มีช่วงปลอดภัย",
+  tuneResult:"ผลหลังปรับ: ", tuneSafeBand:"  ·  ช่วงปลอดภัย ",
+  tuneApplied1:"ตั้งค่าเป็น ", tuneApplied2:", ตัวเลข", tuneApplied3:", blur ", tuneApplied4:", min_fill ",
+  tuneApplied5:" — ค่าเหล่านี้ถูกใส่ให้แล้ว และจะถูกส่งออกไปกับ config",
+  tuneMismatch:"ผลที่ความละเอียดเต็มต่างจากตอนไล่ค่า",
+  tuneMismatchFix:"มักเกิดเมื่อกรอบเล็กเกินไป ลองเพิ่ม \u201cขยายสูง px\u201d แล้วกดปรับอัตโนมัติอีกครั้ง",
+  tuneDone:"ปรับค่าให้แล้ว — ตรวจผลในช่องแสดงผลด้านล่าง",
+
+  dRoiShort:"กรอบสูงเพียง ", dRoiShortPx:" px",
+  dRoiShortFix:"ตัวเลขต้องสูงอย่างน้อย 40 px หลังขยาย — เพิ่มค่า \u201cขยายสูง px\u201d เป็น 160 หรือขยับกล้องเข้าใกล้/ซูมเข้า",
+  dRoiSmall:"กรอบสูง ", dRoiSmall2:" px ถือว่าเล็ก",
+  dRoiSmallFix:"ตั้ง \u201cขยายสูง px\u201d = 160 จะช่วยให้แยกเส้นแต่ละขีดได้ดีขึ้น",
+  dOver:"ภาพสว่างจนล้น ", dOver2:"% ของกรอบเป็นสีขาวตัน",
+  dOverFix:"ลดค่าแสง/exposure ของกล้อง หรือเลี่ยงมุมที่แสงสะท้อนเข้าหน้าจอโดยตรง ข้อมูลที่ล้นไปแล้วกู้คืนด้วยซอฟต์แวร์ไม่ได้",
+  dDark:"ภาพมืดมาก ค่าเฉลี่ย ", dDarkFix:"เพิ่ม exposure ของกล้อง หรือเปิดไฟส่องเพิ่ม",
+  dContrast:"คอนทราสต์ต่ำ ช่วงความสว่างกว้างแค่ ",
+  dContrastFix:"ตัวเลขกับพื้นหลังต่างกันน้อยเกินไป ปรับมุมกล้องให้พ้นแสงสะท้อน หรือใช้ฮูดบังแสง",
+  dGroups1:"ในกรอบนี้มีตัวเลข ", dGroups2:" หลัก แต่ตั้งค่าไว้ ", dGroups3:" หลัก",
+  dGroupsMoreA:"เลือกอย่างใดอย่างหนึ่ง: ตั้ง \u201cจำนวนหลัก\u201d เป็น ",
+  dGroupsMoreB:" เพื่ออ่านทั้งชุดในกรอบเดียว หรือหดกรอบให้เหลือหลักเดียวแล้วสร้างกรอบแยกทีละหลัก",
+  dGroupsFewer:"กรอบแคบเกินไป หรือช่องไฟระหว่างหลักถูกมองรวมกัน — ขยายกรอบ หรือเปลี่ยน \u201cแบ่งหลัก\u201d เป็นแบ่งเท่ากัน",
+  dNoGroups:"แยกตัวเลขออกจากพื้นหลังไม่ได้เลย",
+  dNoGroupsFix:"สลับค่า \u201cตัวเลขสว่าง/มืด\u201d แล้วกดปรับอัตโนมัติอีกครั้ง",
+  dUnread:"อ่านไม่ออก ", dUnread2:" หลัก",
+  dUnreadFix:"ดูภาพขาวดำด้านบน ถ้าขีดขาดเป็นท่อน ให้ลด min_fill ถ้าขีดติดกันเป็นก้อน ให้เพิ่ม min_fill",
+  dLowConf:"อ่านได้แต่ค่าความมั่นใจต่ำ ",
+  dLowConfFix:"ค่านี้พลิกง่ายเมื่อแสงเปลี่ยน ตั้ง stable_frames เป็น 3 ขึ้นไปก่อนใช้งานจริง",
+  dOk:"ไม่พบปัญหาที่ชัดเจน", dOkFix:"ทดสอบซ้ำในช่วงเวลาที่แสงต่างกันก่อนนำไปใช้จริง",
+
+  /* preview */
+  tryInBrowser:"ทดลองอ่านในเบราว์เซอร์", estimate:"ประมาณการ", testNow:"ทดสอบเลย",
+  testing:"กำลังอ่าน …",
+  previewDisclaimer:"ผลนี้คำนวณด้วย JavaScript เพื่อช่วยจูนพารามิเตอร์เท่านั้น ค่าจริงให้ยืนยันด้วย Python บนเครื่องปลายทางเสมอ",
+  previewNeedSource:"โหลดภาพอ้างอิง หรือเปิดกล้องสด จึงจะทดลองอ่านได้",
+  unreadSome:"อ่านไม่ออกบางหลัก · ", conf:"conf ",
+  hint_digits_7seg:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า กดปุ่มนี้เพื่ออ่านซ้ำได้",
+  hint_ocr_text:"ใช้เอนจิน Tesseract ครั้งแรกต้องต่อเน็ตเพื่อโหลด อาจใช้เวลาสักครู่",
+  hint_yolo_detect:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
+  hint_yolo_classify:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
+  hint_barcode_qr:"อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
+  hint_presence_diff:"เทียบกับเฟรมอ้างอิง กดสองครั้งเพื่อดูผลการเปลี่ยนแปลง",
+  hint_color_check:"นับสัดส่วนพิกเซลที่อยู่ในช่วงสีที่ตั้งไว้",
+  hintDefault:"กดปุ่ม \u201cทดสอบเลย\u201d ด้านบนเพื่ออ่านค่า",
+  testFailed:"ทดสอบไม่สำเร็จ: ",
+
+  /* eval results */
+  noModelPicked:"ยังไม่ได้เลือกโมเดลให้กรอบนี้", modelRunFail:"โมเดลรันไม่ผ่าน: ",
+  ocrNothing:"OCR อ่านไม่เจอตัวอักษรในกรอบนี้",
+  readNative:"อ่านด้วย BarcodeDetector (", readQrBuiltin:"อ่านด้วยตัวถอด QR ในตัว (ออฟไลน์)",
+  readBcBuiltin:"อ่านด้วยตัวถอดบาร์โค้ดในตัว (", readBcLines:", ตรงกัน ", readBcLines2:" เส้น)",
+  codeNotFound:"ยังอ่านไม่เจอ — ให้กรอบครอบทั้งบาร์โค้ดรวมขอบขาวซ้ายขวา และวางให้บาร์ตั้งตรง",
+  taskBrowserNo:"ทดสอบ task นี้ในเบราว์เซอร์ไม่ได้ — ใช้ Python",
+
+  /* dialogs */
+  copy:"คัดลอก", close:"ปิด", cancel:"ยกเลิก", done:"เสร็จ",
+  addModelTitle:"เพิ่มโมเดล", saveModel:"บันทึกโมเดล",
+  modelFile:"ไฟล์โมเดล (.onnx)", noFileChosen:"ยังไม่ได้เลือกไฟล์",
+  modelNick:"ชื่อเรียก", modelNickPh:"เช่น defect_v3", modelKind:"ชนิด",
+  modelSize:"ขนาด input (imgsz)", modelDeployName:"ชื่อไฟล์ตอน deploy บน Python",
+  classNames:"ชื่อคลาส (บรรทัดละ 1 ชื่อ หรือคั่นด้วยจุลภาค ตามลำดับ index)",
+  classNamesHint:"ถ้าเว้นว่าง จะแสดงเป็นเลข index แทน · วางเนื้อหาจากช่อง <b>names</b> ใน data.yaml ได้เลย",
+  modelPrivacy:'โมเดลถูกเก็บไว้ในเบราว์เซอร์ของเครื่องนี้เท่านั้น ไม่มีการอัปโหลดไปที่ใด<br>ตอนกดส่งออก config ระบบจะใส่ชื่อไฟล์โมเดลลงใน config ให้ แต่ไฟล์ .onnx ต้องคัดลอกไปวางข้าง ๆ <span class="kbd">tesr_vision_runner.py</span> เอง',
+  rtFps:"Loop FPS สูงสุด", rtShow:"แสดงหน้าต่างภาพ", rtShowYes:"แสดง", rtShowNo:"ไม่แสดง (headless)",
+  rtCsv:"บันทึก CSV", rtJsonl:"บันทึก JSONL", rtSave:"เก็บภาพเมื่อค่าเปลี่ยน",
+  rtSaveNo:"ไม่เก็บ", rtSaveYes:"เก็บ", rtSaveDir:"โฟลเดอร์เก็บภาพ",
+  rtNote:'ค่าเหล่านี้ถูกเขียนลงใน config.json และอ่านโดย tesr_vision_runner.py สั่งงานตอนรันทับได้ด้วย <span class="kbd">--headless</span> <span class="kbd">--test</span>',
+
+  /* toasts */
+  imgLoaded:"โหลดภาพอ้างอิงแล้ว ", imgFailed:"โหลดภาพไม่สำเร็จ",
+  corsBlocked:"เซิร์ฟเวอร์ภาพไม่อนุญาต CORS — บันทึกภาพแล้วอัปโหลดแทน",
+  urlFailed:"ดึงภาพจาก URL ไม่สำเร็จ",
+  liveOn:"กล้องสดทำงานแล้ว — ลากกรอบบนภาพได้เลย", liveFail:"เปิดกล้องไม่ได้: ",
+  noCamApi:"เบราว์เซอร์นี้ไม่อนุญาตให้เข้าถึงกล้อง",
+  copied:"คัดลอกแล้ว", copyFailed:"คัดลอกไม่สำเร็จ — เลือกข้อความแล้วกด Ctrl+C",
+  configImported:"นำเข้า config แล้ว", badFile:"ไฟล์ไม่ถูกต้อง: ",
+  pickOnnx:"เลือกไฟล์ .onnx ก่อน", modelAdded:"เพิ่มโมเดลแล้ว — กำลังเตรียมเอนจิน",
+  modelReady1:"โมเดล \u201c", modelReady2:"\u201d พร้อมใช้งาน", modelPrepFail:"เตรียมโมเดลไม่สำเร็จ: ",
+  saved:"saved ", scriptError:"เกิดข้อผิดพลาดในสคริปต์: ",
+  scriptErrorTail:"  ·  กด F12 → Console เพื่อดูรายละเอียด",
+
+  /* export quickstart */
+  qsTitle:"วิธีรันบนเครื่องจริง"
+},
+
+en: {
+  projectName:"Project name", importConfig:"Import config", runtimeSettings:"Runtime settings",
+  viewJson:"View JSON", exportBtn:"Export config + Python",
+
+  camerasTitle:"Cameras / stations", addCamera:"+ Add camera", cameraSettings:"Selected camera",
+  cameraName:"Camera name", cameraId:"Camera ID (used in MQTT/log)",
+  sourcePh:"0 or rtsp://user:pass@ip:554/stream",
+  sourceHint:"0,1,2 = USB/CSI · rtsp:// = IP camera · .mp4 / .jpg files also work",
+  rotateBefore:"Rotate before processing",
+
+  myModels:"My models", addModel:"+ Add a trained model",
+  modelHint:'Accepts <b>.onnx</b> exported from Ultralytics<br><span class="kbd">yolo export model=best.pt format=onnx opset=12</span>',
+  ortIdle:"The ONNX engine loads the first time you use it",
+  ortLoading:"Loading the ONNX engine …", ortReady:"ONNX engine ready",
+  ortFailed:"Could not load the ONNX engine (offline?)", ortTimeout:"Could not load the ONNX engine (timed out)",
+  ortErr:"Could not load the ONNX engine — this machine may be offline",
+  ortErrTimeout:"Could not load the ONNX engine — timed out, check the connection",
+  ocrErr:"Could not load the OCR engine — needs internet the first time",
+  ocrErrTimeout:"Could not load the OCR engine — timed out, check the connection",
+
+  referenceImage:"Reference image", loadImage:"Load an image",
+  wantCameraHint:"Want a frame from the camera? Switch to <b>Live camera</b> above, then press <b>Freeze frame</b> once the angle looks right.",
+  orFromUrl:"Or pull from an image URL", fetchBtn:"Fetch",
+  dropHint:'Drop an image onto the canvas, or press <span class="kbd">Ctrl</span>+<span class="kbd">V</span> to paste one',
+  noCameraApi:"This browser will not grant camera access. Try Chrome or Edge.<br>Meanwhile you can still load, drop or paste an image.",
+
+  displayMode:"Display mode", modeStill:"Still image", modeLive:"Live camera",
+  chooseCamera:"Choose camera", freezeBtn:"Freeze frame", readLive:"Read live",
+  newRoiTask:"Task for the next ROI", fitScreen:"Fit",
+  duplicateRoi:"Duplicate ROI", deleteRoi:"Delete ROI",
+  digitGuides:"Digit guides", roiLabels:"ROI labels",
+
+  noImageTitle:"No reference image yet",
+  noImageBody:"Load a photo of the machine · capture from the camera · or drop a file here<br>then drag on the image to <b>draw ROIs</b> — as many as you need",
+  stImage:"Image", stCursor:"Cursor", stRois:"ROIs", live:"live",
+  stHint:"drag = new ROI · drag an edge = resize · top dot = rotate · Del = delete · wheel = zoom",
+
+  roiList:"ROI list", roiEmptyHint:"Drag on the image to create the first ROI",
+  roiProps:"ROI properties", fieldName:"Name", fieldEnabled:"Enabled", on:"On", off:"Off",
+  fieldTask:"Task", fieldOutputKey:"Output key",
+  fieldStable:"Stable frames", fieldEvery:"Process every N frames", fieldAngle:"Angle °",
+
+  task_digits_7seg:"Read 7-segment / LCD digits", task_ocr_text:"OCR text",
+  task_yolo_detect:"YOLO object detection", task_yolo_classify:"YOLO classification",
+  task_barcode_qr:"Barcode / QR", task_presence_diff:"Change / presence detection",
+  task_color_check:"Colour check (status lamp)",
+
+  pDigits:"Digits in this ROI", pDecimals:"Decimals",
+  digitsHint:"Defaults to <b>1 digit</b> — one ROI per digit copes best with uneven lighting and camera angle. To read a whole reading in one box, set the real digit count, e.g. 4.",
+  pSplit:"Digit split", splitAuto:"Automatic", splitFixed:"Even split",
+  pPolarity:"Digit polarity", polLight:"Bright on dark", polDark:"Dark on bright",
+  pThreshold:"Threshold", thrOtsu:"otsu (automatic)", pThresholdVal:"Fixed value",
+  pBlur:"Blur", pMinFill:"min_fill", pUpscale:"Upscale height px",
+  pUnit:"Unit", pAsNumber:"Convert to number", yes:"Yes", no:"No",
+  pEngine:"Engine", pLang:"Language", pWhitelist:"Whitelist",
+  pPreprocess:"Preprocess", pInvert:"Invert", enabled:"On", disabled:"Off",
+  pModelUse:"Model to use", pickModel:"— pick a model —", noModelYet:"— no models yet, press + Add a trained model —",
+  classesCount:"classes", pOutput:"Value to output", outCount:"Number found", outClasses:"Class names",
+  outItems:"Full details", pFilterClasses:"Keep only these classes",
+  filterPh:"blank = all classes, e.g. person,helmet", pDeployName:"Model filename at deploy time",
+  pReadQr:"Read QR", pReadBarcode:"Read linear barcodes",
+  barcodeFormats:"Supports QR · Code 128 · Code 39 · EAN-13 · UPC-A · EAN-8 · ITF<br>Every format is checksum-validated, so it will <b>fail to read</b> far more often than it will <b>read wrong</b><br>Frame the whole barcode including the white quiet zones, and keep the bars upright (about 8° of tilt is fine)",
+  pSensitivity:"Sensitivity", pMinRatio:"min_ratio", pReference:"Reference frame",
+  refFirst:"First frame", refPrev:"Previous frame",
+  pOutputAs:"Output as", outBool:"True/false", outRatio:"Area ratio",
+
+  accuracyCheck:"Accuracy check", autoTune:"Auto-tune", autoTuning:"Sweeping …",
+  diagnoseOnly:"Diagnose only",
+  needImage:"Load a reference image or start the live camera first",
+  tuneFailed:"Auto-tune failed: ", tuneNone:"failed",
+  tuneNoBand:"No setting produced a stable reading",
+  tuneNoBandFix:"This image is not good enough for automatic reading yet. Fix it at the machine first, using the points below.",
+  bandHigh:"wide — copes well with lighting changes", bandMed:"workable", bandLow:"narrow — the value may flip", bandNone:"no safe range",
+  tuneResult:"After tuning: ", tuneSafeBand:"  ·  safe range ",
+  tuneApplied1:"Set to ", tuneApplied2:", digits ", tuneApplied3:", blur ", tuneApplied4:", min_fill ",
+  tuneApplied5:" — these are applied already and will travel with the exported config",
+  tuneMismatch:"The full-resolution result differs from the sweep",
+  tuneMismatchFix:"Usually means the ROI is too small. Raise \u201cUpscale height px\u201d and auto-tune again.",
+  tuneDone:"Tuned — check the readout below",
+
+  dRoiShort:"The ROI is only ", dRoiShortPx:" px tall",
+  dRoiShortFix:"Digits need to be at least 40 px tall after upscaling — set \u201cUpscale height px\u201d to 160, or move the camera closer.",
+  dRoiSmall:"The ROI is ", dRoiSmall2:" px tall, which is small",
+  dRoiSmallFix:"Setting \u201cUpscale height px\u201d to 160 helps separate the individual segments.",
+  dOver:"Overexposed: ", dOver2:"% of the ROI is pure white",
+  dOverFix:"Lower the camera exposure, or move off the angle where light reflects straight off the display. Blown-out pixels cannot be recovered in software.",
+  dDark:"Very dark, mean brightness ", dDarkFix:"Raise the camera exposure or add lighting.",
+  dContrast:"Low contrast, brightness spans only ",
+  dContrastFix:"The digits barely differ from the background. Change the camera angle to avoid glare, or add a shade hood.",
+  dGroups1:"This ROI contains ", dGroups2:" digits, but it is set to ", dGroups3:"",
+  dGroupsMoreA:"Either set \u201cDigits in this ROI\u201d to ",
+  dGroupsMoreB:" to read the whole reading in one box, or shrink the ROI to a single digit and add one ROI per digit.",
+  dGroupsFewer:"The ROI is too narrow, or the gaps between digits are being merged — widen it, or switch \u201cDigit split\u201d to Even split.",
+  dNoGroups:"Cannot separate the digits from the background at all",
+  dNoGroupsFix:"Flip \u201cDigit polarity\u201d and run auto-tune again.",
+  dUnread:"Could not read ", dUnread2:" digit(s)",
+  dUnreadFix:"Look at the black-and-white view above. If segments are broken up, lower min_fill; if they merge into a blob, raise it.",
+  dLowConf:"Readable, but confidence is low ",
+  dLowConfFix:"A value like this flips easily when the light changes. Set stable_frames to 3 or more before going live.",
+  dOk:"No obvious problem found", dOkFix:"Test again at a different time of day before relying on it.",
+
+  tryInBrowser:"Try it in the browser", estimate:"estimate", testNow:"Test now",
+  testing:"Reading …",
+  previewDisclaimer:"This is computed in JavaScript to help you tune the parameters. Always confirm the real value with Python on the target device.",
+  previewNeedSource:"Load a reference image or start the live camera to try a read",
+  unreadSome:"some digits unreadable · ", conf:"conf ",
+  hint_digits_7seg:"Re-reads instantly whenever you change a value. Press to read again.",
+  hint_ocr_text:"Uses the Tesseract engine. The first run needs internet and may take a moment.",
+  hint_yolo_detect:"Runs the selected .onnx model on this ROI",
+  hint_yolo_classify:"Runs the selected .onnx model on this ROI",
+  hint_barcode_qr:"Built-in QR and barcode reading. Works offline, in every browser.",
+  hint_presence_diff:"Compares against a reference frame. Press twice to see a change.",
+  hint_color_check:"Counts the share of pixels inside the colour range you set",
+  hintDefault:"Press \u201cTest now\u201d above to read a value",
+  testFailed:"Test failed: ",
+
+  noModelPicked:"No model selected for this ROI yet", modelRunFail:"The model failed to run: ",
+  ocrNothing:"OCR found no text in this ROI",
+  readNative:"Read with BarcodeDetector (", readQrBuiltin:"Read with the built-in QR decoder (offline)",
+  readBcBuiltin:"Read with the built-in barcode decoder (", readBcLines:", ", readBcLines2:" scan lines agreed)",
+  codeNotFound:"Nothing read yet — frame the whole barcode including the white margins, and keep the bars upright",
+  taskBrowserNo:"This task cannot be tested in the browser — use Python",
+
+  copy:"Copy", close:"Close", cancel:"Cancel", done:"Done",
+  addModelTitle:"Add a model", saveModel:"Save model",
+  modelFile:"Model file (.onnx)", noFileChosen:"No file chosen",
+  modelNick:"Display name", modelNickPh:"e.g. defect_v3", modelKind:"Kind",
+  modelSize:"Input size (imgsz)", modelDeployName:"Filename when deployed with Python",
+  classNames:"Class names (one per line, or comma separated, in index order)",
+  classNamesHint:"Leave blank to show index numbers instead · you can paste straight from the <b>names</b> field of data.yaml",
+  modelPrivacy:'The model stays in this browser on this machine. Nothing is uploaded anywhere.<br>Exporting a config records the model filename, but you still need to copy the .onnx file next to <span class="kbd">tesr_vision_runner.py</span> yourself.',
+  rtFps:"Max loop FPS", rtShow:"Show the video window", rtShowYes:"Show", rtShowNo:"Hide (headless)",
+  rtCsv:"Write CSV", rtJsonl:"Write JSONL", rtSave:"Save an image when the value changes",
+  rtSaveNo:"Don't save", rtSaveYes:"Save", rtSaveDir:"Image folder",
+  rtNote:'These go into config.json and are read by tesr_vision_runner.py. You can override them at run time with <span class="kbd">--headless</span> <span class="kbd">--test</span>',
+
+  imgLoaded:"Reference image loaded ", imgFailed:"Could not load that image",
+  corsBlocked:"That image server blocks CORS — save the image and upload it instead",
+  urlFailed:"Could not fetch the image from that URL",
+  liveOn:"Live camera running — drag on the image to draw an ROI", liveFail:"Could not start the camera: ",
+  noCamApi:"This browser does not allow camera access",
+  copied:"Copied", copyFailed:"Copy failed — select the text and press Ctrl+C",
+  configImported:"Config imported", badFile:"Invalid file: ",
+  pickOnnx:"Choose an .onnx file first", modelAdded:"Model added — preparing the engine",
+  modelReady1:"Model \u201c", modelReady2:"\u201d is ready", modelPrepFail:"Could not prepare the model: ",
+  saved:"saved ", scriptError:"Script error: ",
+  scriptErrorTail:"  ·  press F12 → Console for details",
+
+  qsTitle:"How to run it on the real machine"
+}
+};
+
+let LANG = "th";
+function t(key){
+  const d = I18N[LANG] || I18N.th;
+  return (key in d) ? d[key] : (I18N.th[key] !== undefined ? I18N.th[key] : key);
+}
+function applyI18n(){
+  document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll("[data-i18n-html]").forEach(el => el.innerHTML = t(el.dataset.i18nHtml));
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = t(el.dataset.i18nPh));
+  document.querySelectorAll("[data-i18n-title]").forEach(el => el.title = t(el.dataset.i18nTitle));
+  document.querySelectorAll("[data-i18n-aria]").forEach(el => el.setAttribute("aria-label", t(el.dataset.i18nAria)));
+  document.documentElement.lang = LANG;
+}
+function setLang(lang, redraw){
+  LANG = (lang === "en") ? "en" : "th";
+  try { localStorage.setItem("tesr_roi_lang", LANG); } catch(e){ /* private mode */ }
+  const th = document.getElementById("langTh"), en = document.getElementById("langEn");
+  if(th) th.classList.toggle("on", LANG === "th");
+  if(en) en.classList.toggle("on", LANG === "en");
+  applyI18n();
+  document.title = (LANG === "en")
+    ? "TESR ROI Studio — Draw ROIs for Edge AI Vision"
+    : "TESR ROI Studio — ตีกรอบ ROI สำหรับ Edge AI Vision";
+  if(redraw) rebuildDynamicText();
+}
+function initLang(){
+  let saved = null;
+  try { saved = localStorage.getItem("tesr_roi_lang"); } catch(e){}
+  if(!saved){
+    const nav = (navigator.language || "en").toLowerCase();
+    saved = nav.indexOf("th") === 0 ? "th" : "en";
+  }
+  setLang(saved, false);
+}
+
 /* A visible failure is a fixable failure: if anything throws, say so on screen
    instead of leaving the buttons quietly dead. */
 /* <dialog> fallback for older browsers / embedded panel WebViews */
@@ -1946,26 +2302,28 @@ window.addEventListener("error", ev => {
   const b = document.getElementById("errBar");
   if(!b) return;
   b.style.display = "block";
-  b.textContent = "เกิดข้อผิดพลาดในสคริปต์: " + (ev.message || ev.error) +
-                  "  ·  กด F12 → Console เพื่อดูรายละเอียด";
+  b.textContent = (typeof t === "function" ? t("scriptError") : "Script error: ") +
+                  (ev.message || ev.error) +
+                  (typeof t === "function" ? t("scriptErrorTail") : "");
 });
 
 /* =====================================================================
-   TESR ROI Studio — ตีกรอบ ROI หลายจุดต่อกล้อง เลือก task/model ต่อกรอบ
-   แล้วส่งออกเป็น config.json + tesr_vision_runner.py ที่รันได้ทุก OS
+   TESR ROI Studio — draw ROIs per camera, pick a task or model per ROI,
+   then export config.json + tesr_vision_runner.py that runs on any OS
    ===================================================================== */
 
 /* ROI colours: TESR gold and red lead the palette, the remaining hues are
    muted so the overlay stays in the brand family and still reads apart. */
 const TASKS = {
-  digits_7seg:  {label:"อ่านตัวเลข 7-segment / LCD", color:"#E6CC81", model:false},
-  ocr_text:     {label:"OCR ข้อความ",                color:"#D9A441", model:false},
-  yolo_detect:  {label:"YOLO ตรวจจับวัตถุ",           color:"#F30006", model:true},
-  yolo_classify:{label:"YOLO จำแนกภาพ",              color:"#FF7A6B", model:true},
-  barcode_qr:   {label:"Barcode / QR",               color:"#7FD3E0", model:false},
-  presence_diff:{label:"ตรวจการเปลี่ยนแปลง / มีของ",  color:"#86C97F", model:false},
-  color_check:  {label:"ตรวจสี (ไฟสถานะ)",           color:"#C89BD8", model:false},
+  digits_7seg:  {color:"#E6CC81", model:false},
+  ocr_text:     {color:"#D9A441", model:false},
+  yolo_detect:  {color:"#F30006", model:true},
+  yolo_classify:{color:"#FF7A6B", model:true},
+  barcode_qr:   {color:"#7FD3E0", model:false},
+  presence_diff:{color:"#86C97F", model:false},
+  color_check:  {color:"#C89BD8", model:false},
 };
+const taskLabel = k => t("task_" + k);
 
 const uid = p => p + "_" + Math.random().toString(36).slice(2, 7);
 
@@ -2080,7 +2438,7 @@ function updateEmptyOverlay(){
   const el = document.getElementById("emptyMsg");
   if(el) el.style.display = src ? "none" : "flex";
   const f = frameSize();
-  const txt = src ? f.w + " × " + f.h + (liveReady() ? "  (สด)" : "") : "—";
+  const txt = src ? f.w + " × " + f.h + (liveReady() ? "  (" + t("live") + ")" : "") : "—";
   if(txt !== lastSizeText){
     lastSizeText = txt;
     const st = document.getElementById("stSize");
@@ -2363,7 +2721,7 @@ function renderCamList(){
                         renderAll(); fit(); };
     if(state.cameras.length > 1){
       const x = document.createElement("button"); x.className = "x"; x.textContent = "✕";
-      x.title = "ลบกล้อง";
+      x.title = t("deleteRoi");
       x.onclick = ev => { ev.stopPropagation(); imgCache.delete(c.id);
         state.cameras.splice(i,1); state.ci = Math.max(0, state.ci - 1); state.sel = null; renderAll(); };
       d.appendChild(x);
@@ -2452,38 +2810,38 @@ function renderTaskParams(r){
   const box = P("taskParams"); box.innerHTML = "";
   const p = r.params, add = n => box.appendChild(n);
   if(r.task === "digits_7seg"){
-    add(rowOf([field("จำนวนหลักในกรอบนี้", num(p,"digits",{min:0,step:1})),
-               field("ทศนิยม", num(p,"decimals",{min:0,step:1}))]));
+    add(rowOf([field(t("pDigits"), num(p,"digits",{min:0,step:1})),
+               field(t("pDecimals"), num(p,"decimals",{min:0,step:1}))]));
     const dh = document.createElement("div");
     dh.className = "hint";
-    dh.innerHTML = "เริ่มต้นที่ <b>1 หลัก</b> — กรอบละหลักคือวิธีที่ทนแสงและมุมกล้องได้ดีที่สุด " +
-                   "ถ้าอยากอ่านทั้งชุดในกรอบเดียว ให้ตั้งเป็นจำนวนหลักจริง เช่น 4";
+    dh.innerHTML = t("digitsHint");
     add(dh);
-    add(rowOf([field("แบ่งหลัก", sel(p,"split",[["auto","อัตโนมัติ"],["fixed","แบ่งเท่ากัน"]])),
-               field("ตัวเลขสว่าง", sel(p,"invert",[[false,"สว่างบนพื้นมืด"],[true,"มืดบนพื้นสว่าง"]]))]));
-    add(rowOf([field("Threshold", sel(p,"threshold_mode",[["otsu","otsu (อัตโนมัติ)"],["fixed","fixed"],["adaptive","adaptive"]])),
-               field("ค่า fixed", num(p,"threshold",{min:0,max:255,step:1}))]));
-    add(rowOf([field("Blur", num(p,"blur",{min:1,max:15,step:2})),
-               field("min_fill", num(p,"min_fill",{min:0.1,max:0.95,step:0.05})),
-               field("ขยายสูง px", num(r,"upscale_to",{min:0,step:20}))]));
-    add(rowOf([field("หน่วย", txt(p,"unit")), field("แปลงเป็นตัวเลข", sel(p,"as_number",[[true,"ใช่"],[false,"ไม่"]]))]));
+    add(rowOf([field(t("pSplit"), sel(p,"split",[["auto",t("splitAuto")],["fixed",t("splitFixed")]])),
+               field(t("pPolarity"), sel(p,"invert",[[false,t("polLight")],[true,t("polDark")]]))]));
+    add(rowOf([field(t("pThreshold"), sel(p,"threshold_mode",[["otsu",t("thrOtsu")],["fixed","fixed"],["adaptive","adaptive"]])),
+               field(t("pThresholdVal"), num(p,"threshold",{min:0,max:255,step:1}))]));
+    add(rowOf([field(t("pBlur"), num(p,"blur",{min:1,max:15,step:2})),
+               field(t("pMinFill"), num(p,"min_fill",{min:0.1,max:0.95,step:0.05})),
+               field(t("pUpscale"), num(r,"upscale_to",{min:0,step:20}))]));
+    add(rowOf([field(t("pUnit"), txt(p,"unit")),
+               field(t("pAsNumber"), sel(p,"as_number",[[true,t("yes")],[false,t("no")]]))]));
   } else if(r.task === "ocr_text"){
-    add(rowOf([field("Engine", sel(p,"engine",[["tesseract","pytesseract"],["easyocr","easyocr"]])),
-               field("ภาษา", txt(p,"lang"))]));
+    add(rowOf([field(t("pEngine"), sel(p,"engine",[["tesseract","pytesseract"],["easyocr","easyocr"]])),
+               field(t("pLang"), txt(p,"lang"))]));
     add(rowOf([field("PSM", num(p,"psm",{min:0,max:13,step:1})),
-               field("Whitelist", txt(p,"whitelist"))]));
-    add(rowOf([field("Preprocess", sel(p,"preprocess",[[true,"เปิด"],[false,"ปิด"]])),
-               field("Invert", sel(p,"invert",[[false,"ไม่"],[true,"ใช่"]]))]));
+               field(t("pWhitelist"), txt(p,"whitelist"))]));
+    add(rowOf([field(t("pPreprocess"), sel(p,"preprocess",[[true,t("enabled")],[false,t("disabled")]])),
+               field(t("pInvert"), sel(p,"invert",[[false,t("no")],[true,t("yes")]]))]));
   } else if(r.task === "yolo_detect" || r.task === "yolo_classify"){
     r.model = r.model || defaultModel(r.task);
     const wantType = r.task === "yolo_detect" ? "detect" : "classify";
     const pick = document.createElement("select");
     const none = document.createElement("option");
-    none.value = ""; none.textContent = models.length ? "— เลือกโมเดล —" : "— ยังไม่มีโมเดล กด + เพิ่มโมเดล —";
+    none.value = ""; none.textContent = models.length ? t("pickModel") : t("noModelYet");
     pick.appendChild(none);
     models.filter(m => m.type === wantType).forEach(m => {
       const o = document.createElement("option"); o.value = m.id;
-      o.textContent = m.name + "  (" + (m.names.length || "?") + " คลาส)";
+      o.textContent = m.name + "  (" + (m.names.length || "?") + " " + t("classesCount") + ")";
       pick.appendChild(o);
     });
     pick.value = r.model.id || "";
@@ -2494,39 +2852,38 @@ function renderTaskParams(r){
              r.model.conf = m.conf; r.model.iou = m.iou; r.model.class_names = m.names; }
       syncProps(); updatePreview();
     };
-    add(field("โมเดลที่ใช้", pick));
+    add(field(t("pModelUse"), pick));
 
     add(rowOf([field("conf", num(r.model,"conf",{min:0,max:1,step:0.05})),
                field("iou", num(r.model,"iou",{min:0,max:1,step:0.05})),
                field("imgsz", num(r.model,"imgsz",{min:64,step:32}))]));
     if(r.task === "yolo_detect"){
-      add(field("ค่าที่ส่งออก", sel(p,"output",[["count","จำนวนที่เจอ"],["classes","รายชื่อคลาส"],["items","รายละเอียดทั้งหมด"]])));
+      add(field(t("pOutput"), sel(p,"output",
+        [["count",t("outCount")],["classes",t("outClasses")],["items",t("outItems")]])));
       const cls = document.createElement("input");
       cls.value = (r.model.classes || []).join(",");
-      cls.placeholder = "เว้นว่าง = ทุกคลาส เช่น person,helmet";
+      cls.placeholder = t("filterPh");
       cls.oninput = () => r.model.classes = cls.value.split(",").map(s => s.trim()).filter(Boolean);
-      add(field("กรองเฉพาะคลาส", cls));
+      add(field(t("pFilterClasses"), cls));
     }
-    add(field("ชื่อไฟล์โมเดลตอน deploy", txt(r.model,"path")));
+    add(field(t("pDeployName"), txt(r.model,"path")));
   } else if(r.task === "barcode_qr"){
-    add(rowOf([field("อ่าน QR", sel(p,"qr",[[true,"เปิด"],[false,"ปิด"]])),
-               field("อ่านบาร์โค้ดแท่ง", sel(p,"barcode",[[true,"เปิด"],[false,"ปิด"]]))]));
+    add(rowOf([field(t("pReadQr"), sel(p,"qr",[[true,t("enabled")],[false,t("disabled")]])),
+               field(t("pReadBarcode"), sel(p,"barcode",[[true,t("enabled")],[false,t("disabled")]]))]));
     const fmts = document.createElement("div");
     fmts.className = "hint";
-    fmts.innerHTML = "รองรับ QR · Code 128 · Code 39 · EAN-13 · UPC-A · EAN-8 · ITF<br>" +
-      "ทุกฟอร์แมตตรวจ checksum ก่อนตอบ จึงมักจะ<b>อ่านไม่เจอ</b> มากกว่า<b>อ่านผิด</b><br>" +
-      "วางกรอบให้คลุมทั้งบาร์โค้ดรวมขอบขาวซ้ายขวา และให้แท่งตั้งตรง (เอียงได้ราว 8°)";
+    fmts.innerHTML = t("barcodeFormats");
     add(fmts);
   } else if(r.task === "presence_diff"){
-    add(rowOf([field("Sensitivity", num(p,"sensitivity",{min:1,max:120,step:1})),
-               field("min_ratio", num(p,"min_ratio",{min:0.001,max:1,step:0.01}))]));
-    add(field("ภาพอ้างอิง", sel(p,"reference",[["first","เฟรมแรก"],["previous","เฟรมก่อนหน้า"]])));
+    add(rowOf([field(t("pSensitivity"), num(p,"sensitivity",{min:1,max:120,step:1})),
+               field(t("pMinRatio"), num(p,"min_ratio",{min:0.001,max:1,step:0.01}))]));
+    add(field(t("pReference"), sel(p,"reference",[["first",t("refFirst")],["previous",t("refPrev")]])));
   } else if(r.task === "color_check"){
     add(rowOf([field("H min", num(p,"h_min",{min:0,max:179})), field("H max", num(p,"h_max",{min:0,max:179}))]));
     add(rowOf([field("S min", num(p,"s_min",{min:0,max:255})), field("S max", num(p,"s_max",{min:0,max:255}))]));
     add(rowOf([field("V min", num(p,"v_min",{min:0,max:255})), field("V max", num(p,"v_max",{min:0,max:255}))]));
-    add(rowOf([field("min_ratio", num(p,"min_ratio",{min:0,max:1,step:0.05})),
-               field("ส่งออกเป็น", sel(p,"output",[["bool","จริง/เท็จ"],["ratio","สัดส่วนพื้นที่"]]))]));
+    add(rowOf([field(t("pMinRatio"), num(p,"min_ratio",{min:0,max:1,step:0.05})),
+               field(t("pOutputAs"), sel(p,"output",[["bool",t("outBool")],["ratio",t("outRatio")]]))]));
   }
 }
 
@@ -2571,9 +2928,9 @@ function setBackground(dataUrl){
     imgCache.set(c.id, im);
     c.bg = dataUrl; c.width = im.naturalWidth; c.height = im.naturalHeight;
     state.view.fitted = false;
-    renderAll(); fit(); toast("โหลดภาพอ้างอิงแล้ว " + im.naturalWidth + "×" + im.naturalHeight);
+    renderAll(); fit(); toast(t("imgLoaded") + im.naturalWidth + "×" + im.naturalHeight);
   };
-  im.onerror = () => toast("โหลดภาพไม่สำเร็จ");
+  im.onerror = () => toast(t("imgFailed"));
   im.src = dataUrl;
 }
 function shrink(img, max){
@@ -2609,8 +2966,8 @@ P("btnUrl").onclick = () => {
     c.width = im.naturalWidth; c.height = im.naturalHeight;
     c.getContext("2d").drawImage(im, 0, 0);
     try { setBackground(c.toDataURL("image/jpeg", 0.85)); }
-    catch(err){ toast("เซิร์ฟเวอร์ภาพไม่อนุญาต CORS — บันทึกภาพแล้วอัปโหลดแทน"); } };
-  im.onerror = () => toast("ดึงภาพจาก URL ไม่สำเร็จ");
+    catch(err){ toast(t("corsBlocked")); } };
+  im.onerror = () => toast(t("urlFailed"));
   im.src = u + (u.includes("?") ? "&" : "?") + "t=" + Date.now();
 };
 
@@ -2803,35 +3160,26 @@ function diagnose(gray, w, h, p, result){
 
   const add = (level, msg, fix) => out.push({level, msg, fix});
 
-  if(h < 40) add("bad", "กรอบสูงเพียง " + h + " px", "ตัวเลขต้องสูงอย่างน้อย 40 px หลังขยาย — เพิ่มค่า \"ขยายสูง px\" เป็น 160 หรือขยับกล้องเข้าใกล้/ซูมเข้า");
-  else if(h < 70) add("warn", "กรอบสูง " + h + " px ถือว่าเล็ก", "ตั้ง \"ขยายสูง px\" = 160 จะช่วยให้แยกเส้นแต่ละขีดได้ดีขึ้น");
+  if(h < 40) add("bad", t("dRoiShort") + h + t("dRoiShortPx"), t("dRoiShortFix"));
+  else if(h < 70) add("warn", t("dRoiSmall") + h + t("dRoiSmall2"), t("dRoiSmallFix"));
 
-  if(sat / n > 0.15) add("bad", "ภาพสว่างจนล้น " + (100*sat/n).toFixed(0) + "% ของกรอบเป็นสีขาวตัน",
-    "ลดค่าแสง/exposure ของกล้อง หรือเลี่ยงมุมที่แสงสะท้อนเข้าหน้าจอโดยตรง ข้อมูลที่ล้นไปแล้วกู้คืนด้วยซอฟต์แวร์ไม่ได้");
-  if(black / n > 0.55 && mean < 25) add("warn", "ภาพมืดมาก ค่าเฉลี่ย " + mean.toFixed(0),
-    "เพิ่ม exposure ของกล้อง หรือเปิดไฟส่องเพิ่ม");
-  if(spread < 45) add("bad", "คอนทราสต์ต่ำ ช่วงความสว่างกว้างแค่ " + spread,
-    "ตัวเลขกับพื้นหลังต่างกันน้อยเกินไป ปรับมุมกล้องให้พ้นแสงสะท้อน หรือใช้ฮูดบังแสง");
+  if(sat / n > 0.15) add("bad", t("dOver") + (100*sat/n).toFixed(0) + t("dOver2"), t("dOverFix"));
+  if(black / n > 0.55 && mean < 25) add("warn", t("dDark") + mean.toFixed(0), t("dDarkFix"));
+  if(spread < 45) add("bad", t("dContrast") + spread, t("dContrastFix"));
 
   const groups = splitDigitsJS(result.bin, w, h, p.min_gap_ratio).length;
   const want = +p.digits || 0;
   if(want && groups && groups !== want)
-    add("warn", "ในกรอบนี้มีตัวเลข " + groups + " หลัก แต่ตั้งค่าไว้ " + want + " หลัก",
-        groups > want
-          ? "เลือกอย่างใดอย่างหนึ่ง: ตั้ง \"จำนวนหลัก\" เป็น " + groups +
-            " เพื่ออ่านทั้งชุดในกรอบเดียว หรือหดกรอบให้เหลือหลักเดียวแล้วสร้างกรอบแยกทีละหลัก"
-          : "กรอบแคบเกินไป หรือช่องไฟระหว่างหลักถูกมองรวมกัน — ขยายกรอบ หรือเปลี่ยน \"แบ่งหลัก\" เป็นแบ่งเท่ากัน");
-  if(!groups) add("bad", "แยกตัวเลขออกจากพื้นหลังไม่ได้เลย",
-    "สลับค่า \"ตัวเลขสว่าง/มืด\" แล้วกดปรับอัตโนมัติอีกครั้ง");
+    add("warn", t("dGroups1") + groups + t("dGroups2") + want + t("dGroups3"),
+        groups > want ? t("dGroupsMoreA") + groups + t("dGroupsMoreB") : t("dGroupsFewer"));
+  if(!groups) add("bad", t("dNoGroups"), t("dNoGroupsFix"));
 
   if(result.text.includes("?"))
-    add("warn", "อ่านไม่ออก " + (result.text.match(/\?/g) || []).length + " หลัก",
-        "ดูภาพขาวดำด้านบน ถ้าขีดขาดเป็นท่อน ให้ลด min_fill ถ้าขีดติดกันเป็นก้อน ให้เพิ่ม min_fill");
+    add("warn", t("dUnread") + (result.text.match(/\?/g) || []).length + t("dUnread2"), t("dUnreadFix"));
   if(result.conf < 0.35 && !result.text.includes("?"))
-    add("warn", "อ่านได้แต่ค่าความมั่นใจต่ำ " + result.conf.toFixed(2),
-        "ค่านี้พลิกง่ายเมื่อแสงเปลี่ยน ตั้ง stable_frames เป็น 3 ขึ้นไปก่อนใช้งานจริง");
+    add("warn", t("dLowConf") + result.conf.toFixed(2), t("dLowConfFix"));
 
-  if(!out.length) add("ok", "ไม่พบปัญหาที่ชัดเจน", "ทดสอบซ้ำในช่วงเวลาที่แสงต่างกันก่อนนำไปใช้จริง");
+  if(!out.length) add("ok", t("dOk"), t("dOkFix"));
   return {mean, sat: sat/n, spread, groups, notes: out};
 }
 
@@ -3075,24 +3423,24 @@ function setOrtStatus(msg, ok){
 function loadOrt(){
   if(ortReady) return ortReady;
   ortReady = new Promise((resolve, reject) => {
-    if(window.ort){ setOrtStatus("เอนจิน ONNX พร้อมใช้งาน", true); return resolve(window.ort); }
+    if(window.ort){ setOrtStatus(t("ortReady"), true); return resolve(window.ort); }
     let i = 0;
     const tryNext = () => {
       if(i >= ORT_URLS.length){
         ortReady = null;
-        setOrtStatus("โหลดเอนจิน ONNX ไม่ได้ (ออฟไลน์?)");
-        return reject(new Error("โหลดเอนจิน ONNX ไม่สำเร็จ — เครื่องนี้อาจไม่ได้ต่ออินเทอร์เน็ต"));
+        setOrtStatus(t("ortFailed"));
+        return reject(new Error(t("ortErr")));
       }
       const sc = document.createElement("script");
       sc.src = ORT_URLS[i++];
-      sc.onload = () => { setOrtStatus("เอนจิน ONNX พร้อมใช้งาน", true); resolve(window.ort); };
+      sc.onload = () => { setOrtStatus(t("ortReady"), true); resolve(window.ort); };
       sc.onerror = tryNext;
       document.head.appendChild(sc);
     };
-    setOrtStatus("กำลังโหลดเอนจิน ONNX …");
+    setOrtStatus(t("ortLoading"));
     setTimeout(() => { if(ortReady){ ortReady = null;
-      setOrtStatus("โหลดเอนจิน ONNX ไม่สำเร็จ (หมดเวลารอ)");
-      reject(new Error("โหลดเอนจิน ONNX ไม่สำเร็จ — หมดเวลารอ ตรวจการเชื่อมต่ออินเทอร์เน็ต")); } }, 20000);
+      setOrtStatus(t("ortTimeout"));
+      reject(new Error(t("ortErrTimeout"))); } }, 20000);
     tryNext();
   });
   return ortReady;
@@ -3466,7 +3814,7 @@ function loadTesseract(){
     const tryNext = () => {
       if(i >= TESS_URLS.length){
         tessReady = null;
-        return reject(new Error("โหลดเอนจิน OCR ไม่สำเร็จ — ต้องต่ออินเทอร์เน็ตครั้งแรก"));
+        return reject(new Error(t("ocrErr")));
       }
       const sc = document.createElement("script");
       sc.src = TESS_URLS[i++];
@@ -3475,7 +3823,7 @@ function loadTesseract(){
       document.head.appendChild(sc);
     };
     setTimeout(() => { if(tessReady){ tessReady = null;
-      reject(new Error("โหลดเอนจิน OCR ไม่สำเร็จ — หมดเวลารอ ตรวจการเชื่อมต่ออินเทอร์เน็ต")); } }, 20000);
+      reject(new Error(t("ocrErrTimeout"))); } }, 20000);
     tryNext();
   });
   return tessReady;
@@ -3619,7 +3967,7 @@ async function listCameras(){
 }
 async function startLive(deviceId){
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
-    throw new Error("เบราว์เซอร์นี้ไม่อนุญาตให้เข้าถึงกล้อง");
+    throw new Error(t("noCamApi"));
   stopLive();
   const want = {video: deviceId ? {deviceId:{exact:deviceId}} : {width:{ideal:1920}, height:{ideal:1080}}};
   live.stream = await navigator.mediaDevices.getUserMedia(want);
@@ -3648,8 +3996,8 @@ function setMode(mode){
   P("liveInferWrap").style.display = isLive ? "flex" : "none";
   if(isLive){
     startLive(P("liveDevice").value || undefined)
-      .then(() => toast("กล้องสดทำงานแล้ว — ลากกรอบบนภาพได้เลย"))
-      .catch(err => { setMode("snap"); toast("เปิดกล้องไม่ได้: " + err.message); });
+      .then(() => toast(t("liveOn")))
+      .catch(err => { setMode("snap"); toast(t("liveFail") + err.message); });
   } else {
     stopLive(); renderAll(); invalidate();
   }
@@ -3715,7 +4063,7 @@ async function evalRoi(roi){
       try{
         const codes = await qrDetector.detect(crop);
         if(codes.length) return {value: codes[0].rawValue, conf: 1, crop,
-                                 note: "อ่านด้วย BarcodeDetector (" + codes[0].format + ")"};
+                                 note: t("readNative") + codes[0].format + ")"};
       }catch(e){ /* fall through to the bundled decoders */ }
     }
     const g = crop.getContext("2d", {willReadFrequently:true}).getImageData(0, 0, w, h);
@@ -3723,7 +4071,7 @@ async function evalRoi(roi){
     if(p.qr !== false && typeof jsQR === "function"){
       try{
         const r = jsQR(g.data, w, h, {inversionAttempts: "attemptBoth"});
-        if(r && r.data) return {value: r.data, conf: 1, crop, note: "อ่านด้วยตัวถอด QR ในตัว (ออฟไลน์)"};
+        if(r && r.data) return {value: r.data, conf: 1, crop, note: t("readQrBuiltin")};
       }catch(e){}
     }
     // 3) bundled 1-D decoder
@@ -3731,10 +4079,9 @@ async function evalRoi(roi){
       const gray = grayOf(crop);
       const r = decodeBarcode1D(gray, w, h, {lines: 15});
       if(r) return {value: r.text, conf: Math.min(1, r.votes / 6), crop,
-                    note: "อ่านด้วยตัวถอดบาร์โค้ดในตัว (" + r.format + ", ตรงกัน " + r.votes + " เส้น)"};
+                    note: t("readBcBuiltin") + r.format + t("readBcLines") + r.votes + t("readBcLines2")};
     }
-    return {value:"", conf:0, crop,
-            note:"ยังอ่านไม่เจอ — ให้กรอบครอบทั้งบาร์โค้ดรวมขอบขาวซ้ายขวา และวางให้บาร์ตั้งตรง"};
+    return {value:"", conf:0, crop, note: t("codeNotFound")};
   }
   if(roi.task === "ocr_text"){
     let img = crop;
@@ -3756,21 +4103,21 @@ async function evalRoi(roi){
     try{
       const r = await runOcr(img, roi.params);
       return {value: r.text, conf: r.conf, crop: img,
-              note: r.text ? null : "OCR อ่านไม่เจอตัวอักษรในกรอบนี้"};
+              note: r.text ? null : t("ocrNothing")};
     }catch(e){ return {value:"", conf:0, crop: img, note: e.message}; }
   }
   if(roi.task === "yolo_detect" || roi.task === "yolo_classify"){
     const m = models.find(x => x.id === (roi.model && roi.model.id));
-    if(!m) return {value:null, conf:0, crop, note:"ยังไม่ได้เลือกโมเดลให้กรอบนี้"};
+    if(!m) return {value:null, conf:0, crop, note: t("noModelPicked")};
     try{
       const r = await runModel(m, crop);
       let value = r.value;
       if(roi.task === "yolo_detect" && roi.params.output === "classes")
         value = [...new Set(r.items.map(i => i.name))];
       return {value, conf: r.conf, items: r.items, crop};
-    }catch(e){ return {value:null, conf:0, crop, note:"โมเดลรันไม่ผ่าน: " + e.message}; }
+    }catch(e){ return {value:null, conf:0, crop, note: t("modelRunFail") + e.message}; }
   }
-  return {value:null, conf:0, crop, note:"ทดสอบ task นี้ในเบราว์เซอร์ไม่ได้ — ใช้ Python"};
+  return {value:null, conf:0, crop, note: t("taskBrowserNo")};
 }
 
 async function evalAll(){
@@ -3786,15 +4133,6 @@ async function evalAll(){
 }
 
 /* the one button the preview panel tells people to press */
-const TEST_HINT = {
-  digits_7seg:  "อ่านใหม่ทันทีทุกครั้งที่แก้ค่า กดปุ่มนี้เพื่ออ่านซ้ำได้",
-  ocr_text:     "ใช้เอนจิน Tesseract ครั้งแรกต้องต่อเน็ตเพื่อโหลด อาจใช้เวลาสักครู่",
-  yolo_detect:  "รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
-  yolo_classify:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
-  barcode_qr:   "อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
-  presence_diff:"เทียบกับเฟรมอ้างอิง กดสองครั้งเพื่อดูผลการเปลี่ยนแปลง",
-  color_check:  "นับสัดส่วนพิกเซลที่อยู่ในช่วงสีที่ตั้งไว้"
-};
 /* ---------------- preview panel ---------------- */
 let pvPending = false;
 function updatePreview(){
@@ -3806,7 +4144,7 @@ function updatePreviewNow(){
   const r = selRoi(); if(!r) return;
   if(!sourceEl()){
     P("pvValue").textContent = "—";
-    P("pvConf").textContent = "โหลดภาพอ้างอิง หรือเปิดกล้องสด จึงจะทดลองอ่านได้";
+    P("pvConf").textContent = t("previewNeedSource");
     return;
   }
   const crop = cropRoiCanvas(r, P("pvCrop"));
@@ -3828,8 +4166,7 @@ function updatePreviewNow(){
     P("pvValue").textContent = res && res.value !== null && res.value !== ""
                               ? String(res.value) : "—";
     P("pvConf").textContent = res && res.note ? res.note
-      : (res ? "conf " + res.conf.toFixed(2)
-             : (TEST_HINT[r.task] || "กดปุ่ม \u201cทดสอบเลย\u201d ด้านบนเพื่ออ่านค่า"));
+      : (res ? t("conf") + res.conf.toFixed(2) : t("hint_" + r.task) || t("hintDefault"));
     return;
   }
 
@@ -3848,21 +4185,21 @@ function updatePreviewNow(){
   const dec = +r.params.decimals || 0;
   if(dec > 0 && text.length > dec && !text.includes("?")) text = text.slice(0,-dec) + "." + text.slice(-dec);
   P("pvValue").textContent = text || "—";
-  P("pvConf").textContent = (text.includes("?") ? "อ่านไม่ออกบางหลัก · " : "") +
-    "conf " + res.conf.toFixed(2) + (r.params.unit ? " · " + r.params.unit : "");
+  P("pvConf").textContent = (text.includes("?") ? t("unreadSome") : "") +
+    t("conf") + res.conf.toFixed(2) + (r.params.unit ? " · " + r.params.unit : "");
 }
 
 P("btnTestRoi").onclick = async () => {
   const r = selRoi(); if(!r) return;
-  if(!sourceEl()) return toast("ต้องมีภาพอ้างอิงหรือเปิดกล้องสดก่อน");
+  if(!sourceEl()) return toast(t("needImage"));
   const b = P("btnTestRoi");
-  b.disabled = true; b.textContent = "กำลังอ่าน …";
+  b.disabled = true; b.textContent = t("testing");
   try{
     const res = await evalRoi(r);
     if(res) live.results[r.id] = res;
     if(res && res.note) toast(res.note);
-  }catch(e){ toast("ทดสอบไม่สำเร็จ: " + e.message); }
-  b.disabled = false; b.textContent = "ทดสอบเลย";
+  }catch(e){ toast(t("testFailed") + e.message); }
+  b.disabled = false; b.textContent = t("testNow");
   updatePreviewNow(); invalidate();
 };
 
@@ -3892,29 +4229,28 @@ function currentGray(){
 }
 P("btnDiag").onclick = () => {
   const r = selRoi(), src = currentGray();
-  if(!r || !src) return toast("ต้องมีภาพอ้างอิงหรือกล้องสดก่อน");
+  if(!r || !src) return toast(t("needImage"));
   const res = readDigits(src.gray, src.w, src.h, r.params);
   const d = diagnose(src.gray, src.w, src.h, r.params, res);
   showDiag(d.notes, "sat " + (d.sat*100).toFixed(0) + "% · spread " + d.spread);
 };
 P("btnAutoTune").onclick = () => {
   const r = selRoi(), src = currentGray();
-  if(!r || !src) return toast("ต้องมีภาพอ้างอิงหรือกล้องสดก่อน");
+  if(!r || !src) return toast(t("needImage"));
   P("btnAutoTune").disabled = true;
-  P("btnAutoTune").textContent = "กำลังไล่ค่า …";
+  P("btnAutoTune").textContent = t("autoTuning");
   setTimeout(() => {
     let best = null;
     try{ best = autoTune(src.gray, src.w, src.h, r.params); }
-    catch(e){ toast("ปรับอัตโนมัติล้มเหลว: " + e.message); }
+    catch(e){ toast(t("tuneFailed") + e.message); }
     P("btnAutoTune").disabled = false;
-    P("btnAutoTune").textContent = "ปรับอัตโนมัติ";
+    P("btnAutoTune").textContent = t("autoTune");
 
     if(!best){
       const res0 = readDigits(src.gray, src.w, src.h, r.params);
       const diag = diagnose(src.gray, src.w, src.h, r.params, res0);
-      showDiag([{level:"bad", msg:"หาค่าที่อ่านได้คงที่ไม่เจอเลย",
-                 fix:"ภาพนี้ยังไม่ดีพอสำหรับการอ่านอัตโนมัติ แก้ที่หน้างานก่อนตามรายการด้านล่าง"}]
-               .concat(diag.notes), "ไม่สำเร็จ");
+      showDiag([{level:"bad", msg: t("tuneNoBand"), fix: t("tuneNoBandFix")}]
+               .concat(diag.notes), t("tuneNone"));
       return;
     }
     Object.assign(r.params, {
@@ -3930,22 +4266,21 @@ P("btnAutoTune").onclick = () => {
     const resNow = readDigits(after.gray, after.w, after.h, r.params);
     const diag = diagnose(after.gray, after.w, after.h, r.params, resNow);
 
-    const label = {high:"กว้าง ทนแสงเปลี่ยนได้ดี", medium:"พอใช้", low:"แคบ เสี่ยงพลิกค่า", none:"ไม่มีช่วงปลอดภัย"}[best.robust];
+    const label = {high:t("bandHigh"), medium:t("bandMed"), low:t("bandLow"), none:t("bandNone")}[best.robust];
     const notes = [{
       level: best.robust === "high" ? "ok" : best.robust === "medium" ? "warn" : "bad",
-      msg: "ผลหลังปรับ: " + (best.result.text || "—") + "  ·  ช่วงปลอดภัย " + label,
-      fix: "ตั้งค่าเป็น " + best.params.threshold_mode +
+      msg: t("tuneResult") + (best.result.text || "—") + t("tuneSafeBand") + label,
+      fix: t("tuneApplied1") + best.params.threshold_mode +
            (best.params.threshold_mode === "fixed" ? " (" + best.params.threshold + ")" : "") +
-           ", ตัวเลข" + (best.params.invert ? "มืดบนพื้นสว่าง" : "สว่างบนพื้นมืด") +
-           ", blur " + best.params.blur + ", min_fill " + (+best.params.min_fill).toFixed(2) +
-           " — ค่าเหล่านี้ถูกใส่ให้แล้ว และจะถูกส่งออกไปกับ config",
+           t("tuneApplied2") + (best.params.invert ? t("polDark") : t("polLight")) +
+           t("tuneApplied3") + best.params.blur +
+           t("tuneApplied4") + (+best.params.min_fill).toFixed(2) + t("tuneApplied5"),
       bar: Math.min(1, best.band / 0.3)
     }];
-    if(!best.agrees) notes.push({level:"warn", msg:"ผลที่ความละเอียดเต็มต่างจากตอนไล่ค่า",
-      fix:"มักเกิดเมื่อกรอบเล็กเกินไป ลองเพิ่ม \u201cขยายสูง px\u201d แล้วกดปรับอัตโนมัติอีกครั้ง"});
+    if(!best.agrees) notes.push({level:"warn", msg: t("tuneMismatch"), fix: t("tuneMismatchFix")});
     showDiag(notes.concat(diag.notes),
              "band " + best.band.toFixed(2));
-    toast("ปรับค่าให้แล้ว — ตรวจผลในช่องแสดงผลด้านล่าง");
+    toast(t("tuneDone"));
   }, 30);
 };
 
@@ -3959,7 +4294,7 @@ function renderModels(){
       (m.session ? "#86C97F" : "var(--tesr-gold-deep)") + '"></span>' +
       '<span class="nm"></span><span class="meta">' + m.type + " " + m.size + '</span>';
     d.querySelector(".nm").textContent = m.name;
-    d.title = (m.names.length ? m.names.length + " คลาส: " + m.names.join(", ") : "ไม่ได้ตั้งชื่อคลาส") +
+    d.title = (m.names.length ? m.names.length + " " + t("classesCount") + ": " + m.names.join(", ") : "-") +
               "\n" + (m.bytes.byteLength/1048576).toFixed(1) + " MB";
     const x = document.createElement("button"); x.className = "x"; x.textContent = "✕";
     x.onclick = ev => { ev.stopPropagation();
@@ -3973,7 +4308,7 @@ function renderModels(){
 let pendingBytes = null;
 P("btnAddModel").onclick = () => {
   pendingBytes = null;
-  P("mdFile").value = ""; P("mdFileInfo").textContent = "ยังไม่ได้เลือกไฟล์";
+  P("mdFile").value = ""; P("mdFileInfo").textContent = t("noFileChosen");
   P("mdName").value = ""; P("mdClasses").value = ""; P("mdDeploy").value = "";
   P("dlgModel").showModal();
 };
@@ -3988,7 +4323,7 @@ P("mdFile").onchange = e => {
   });
 };
 P("mdSave").onclick = async () => {
-  if(!pendingBytes) return toast("เลือกไฟล์ .onnx ก่อน");
+  if(!pendingBytes) return toast(t("pickOnnx"));
   const names = P("mdClasses").value.split(/[\n,]/).map(x => x.trim()).filter(Boolean);
   const rec = {id: uid("m"), name: P("mdName").value.trim() || "model",
                type: P("mdType").value, size: +P("mdSize").value || 640,
@@ -3998,12 +4333,12 @@ P("mdSave").onclick = async () => {
   models.push(rec); renderModels(); syncProps();
   P("dlgModel").close();
   dbPut(rec);
-  toast("เพิ่มโมเดลแล้ว — กำลังเตรียมเอนจิน");
+  toast(t("modelAdded"));
   try{
     await getSession(rec);
     renderModels();
-    toast("โมเดล \u201c" + rec.name + "\u201d พร้อมใช้งาน");
-  }catch(e){ toast("เตรียมโมเดลไม่สำเร็จ: " + e.message); }
+    toast(t("modelReady1") + rec.name + t("modelReady2"));
+  }catch(e){ toast(t("modelPrepFail") + e.message); }
 };
 dbAll().then(list => { if(list.length){ list.forEach(m => models.push(m)); renderModels(); } });
 
@@ -4053,8 +4388,8 @@ P("btnJson").onclick = () => {
 };
 P("dlgClose").onclick = () => P("dlg").close();
 P("dlgCopy").onclick = async () => {
-  try{ await navigator.clipboard.writeText(P("dlgBody").textContent); toast("คัดลอกแล้ว"); }
-  catch(e){ toast("คัดลอกไม่สำเร็จ — เลือกข้อความแล้วกด Ctrl+C"); }
+  try{ await navigator.clipboard.writeText(P("dlgBody").textContent); toast(t("copied")); }
+  catch(e){ toast(t("copyFailed")); }
 };
 P("btnPy").onclick = () => {
   const name = slug(P("projName").value);
@@ -4062,16 +4397,17 @@ P("btnPy").onclick = () => {
   const py = document.getElementById("runnerSrc").textContent;
   setTimeout(() => download("tesr_vision_runner.py", py, "text/x-python"), 350);
   setTimeout(() => {
-    P("dlgTitle").textContent = "วิธีรันบนเครื่องจริง";
+    P("dlgTitle").textContent = t("qsTitle");
     P("dlgBody").textContent = quickstart(name);
     P("dlg").showModal();
   }, 700);
 };
 function quickstart(name){
   const cams = state.cameras.map(c => "  " + c.id + "  (" + c.rois.length + " ROI)  source=" + c.source).join("\n");
-  return [
+  const cfg = name + "_config.json";
+  const TH = [
 "ไฟล์ที่ดาวน์โหลด",
-"  " + name + "_config.json     กรอบ ROI ทั้งหมด + ค่าพารามิเตอร์",
+"  " + cfg + "     กรอบ ROI ทั้งหมด + ค่าพารามิเตอร์",
 "  tesr_vision_runner.py        โปรแกรมอ่านค่า ใช้ได้ทั้ง Windows / macOS / Linux / Raspberry Pi / Jetson",
 "",
 "กล้องในไฟล์นี้",
@@ -4080,31 +4416,33 @@ cams,
 "1) ติดตั้ง (ทำครั้งเดียว)",
 "   python -m pip install --upgrade pip",
 "   python -m pip install opencv-python numpy",
-"   # ถ้าจะใช้ YOLO   : pip install ultralytics",
-"   # ถ้าจะใช้ OCR    : pip install pytesseract   (ต้องติดตั้ง Tesseract engine ด้วย)",
-"   # ถ้าจะส่ง MQTT  : pip install paho-mqtt",
-"   # Raspberry Pi   : sudo apt install python3-opencv  แทน pip ได้ ถ้า build ช้า",
+"   # ถ้ามี ROI ที่ใช้โมเดล .onnx : pip install onnxruntime",
+"   # ถ้าจะใช้ OCR                : pip install pytesseract   (ต้องติดตั้ง Tesseract engine ด้วย)",
+"   # ถ้าจะส่ง MQTT               : pip install paho-mqtt",
+"   # Raspberry Pi                : sudo apt install python3-opencv  แทน pip ได้ ถ้า build ช้า",
 "",
 "2) ตรวจว่าโปรแกรมอ่านเลขได้ (ไม่ต้องมีกล้อง)",
 "   python tesr_vision_runner.py --selftest",
 "",
 "3) ทดสอบกับภาพนิ่งก่อน",
-"   python tesr_vision_runner.py --config " + name + "_config.json --image ภาพหน้างาน.jpg --once",
+"   python tesr_vision_runner.py --config " + cfg + " --image photo.jpg --once",
 "",
 "4) ทดสอบหน้างานแบบเห็นภาพสด (มีหน้าต่าง preview + ภาพหลัง threshold)",
-"   python tesr_vision_runner.py --config " + name + "_config.json --test",
+"   python tesr_vision_runner.py --config " + cfg + " --test",
 "      q = ออก   s = บันทึกภาพ",
 "",
 "5) จูนค่าหน้างานด้วยแถบเลื่อน แล้วก๊อปค่ากลับมาใส่ในหน้าเว็บ",
-"   python tesr_vision_runner.py --config " + name + "_config.json --calibrate ชื่อ_ROI",
+"   python tesr_vision_runner.py --config " + cfg + " --calibrate ROI_NAME",
 "",
 "6) รันจริงแบบไม่มีจอ (Jetson / Pi / บริการเบื้องหลัง)",
-"   python tesr_vision_runner.py --config " + name + "_config.json --headless",
+"   python tesr_vision_runner.py --config " + cfg + " --headless",
 "",
 "เปลี่ยนกล้องชั่วคราวโดยไม่แก้ไฟล์",
 "   --source 0            USB camera ตัวแรก",
 "   --source rtsp://user:pass@192.168.1.50:554/stream1",
 "   --camera cam2         เลือกกล้องอื่นในไฟล์เดียวกัน",
+"",
+"ถ้ามี ROI ที่ใช้โมเดล อย่าลืมคัดลอกไฟล์ .onnx ไปวางไว้โฟลเดอร์เดียวกันด้วย",
 "",
 "ผลลัพธ์ที่ได้",
 "   พิมพ์ค่าออกหน้าจอ · logs/results.csv · logs/results.jsonl · MQTT/Webhook ถ้าเปิดไว้",
@@ -4113,9 +4451,59 @@ cams,
 "   วางกรอบให้กว้างกว่าตัวเลขเล็กน้อย เผื่อกล้องขยับ",
 "   แสงสะท้อนบนหน้าจอเครื่องจักรคือสาเหตุอันดับหนึ่งที่อ่านผิด ใช้ฮูดบังแสงหรือเลี่ยงมุมสะท้อน",
 "   ยึดกล้องให้นิ่ง ถ้ากล้องขยับ ต้องตีกรอบใหม่",
-"   ตั้ง stable_frames ≥ 2 เพื่อกันค่ากระพริบตอนตัวเลขกำลังเปลี่ยน",
+"   ตั้ง stable_frames >= 2 เพื่อกันค่ากระพริบตอนตัวเลขกำลังเปลี่ยน",
 "   ค่าความแม่นยำจริงต้องวัดจากหน้างานเท่านั้น"
-  ].join("\n");
+  ];
+  const EN = [
+"Files you just downloaded",
+"  " + cfg + "     every ROI plus its parameters",
+"  tesr_vision_runner.py        the reader; runs on Windows / macOS / Linux / Raspberry Pi / Jetson",
+"",
+"Cameras in this config",
+cams,
+"",
+"1) Install (once)",
+"   python -m pip install --upgrade pip",
+"   python -m pip install opencv-python numpy",
+"   # if any ROI uses an .onnx model : pip install onnxruntime",
+"   # if you use OCR                 : pip install pytesseract   (also install the Tesseract engine)",
+"   # if you publish to MQTT         : pip install paho-mqtt",
+"   # Raspberry Pi                   : sudo apt install python3-opencv is faster than building from pip",
+"",
+"2) Check the reader works, no camera needed",
+"   python tesr_vision_runner.py --selftest",
+"",
+"3) Try it on a still image first",
+"   python tesr_vision_runner.py --config " + cfg + " --image photo.jpg --once",
+"",
+"4) Test on site with a live preview and the thresholded view",
+"   python tesr_vision_runner.py --config " + cfg + " --test",
+"      q = quit   s = save a snapshot",
+"",
+"5) Tune on site with sliders, then paste the values back into the web tool",
+"   python tesr_vision_runner.py --config " + cfg + " --calibrate ROI_NAME",
+"",
+"6) Run for real with no window (Jetson / Pi / as a service)",
+"   python tesr_vision_runner.py --config " + cfg + " --headless",
+"",
+"Switch camera without editing the file",
+"   --source 0            first USB camera",
+"   --source rtsp://user:pass@192.168.1.50:554/stream1",
+"   --camera cam2         another camera from the same config",
+"",
+"If any ROI uses a model, copy the .onnx file into the same folder as well.",
+"",
+"What you get",
+"   values printed to the console · logs/results.csv · logs/results.jsonl · MQTT/Webhook when enabled",
+"",
+"Things that bite on the shop floor",
+"   Leave a little margin around the digits so a small camera shift does not break the read.",
+"   Glare on the machine's screen is the number one cause of wrong readings. Use a shade hood or change the angle.",
+"   Mount the camera rigidly. If it moves, the ROIs have to be redrawn.",
+"   Set stable_frames >= 2 so the value does not flicker while the display is changing.",
+"   Real accuracy can only be measured on site."
+  ];
+  return (LANG === "en" ? EN : TH).join("\n");
 }
 
 /* import */
@@ -4126,8 +4514,8 @@ P("fileImport").onchange = e => {
   fr.onload = () => {
     try{
       const cfg = JSON.parse(fr.result);
-      loadConfig(cfg); toast("นำเข้า config แล้ว");
-    }catch(err){ toast("ไฟล์ไม่ถูกต้อง: " + err.message); }
+      loadConfig(cfg); toast(t("configImported"));
+    }catch(err){ toast(t("badFile") + err.message); }
   };
   fr.readAsText(f); e.target.value = "";
 };
@@ -4186,19 +4574,37 @@ function toast(msg){
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600);
 }
 
-/* task selectors */
-(function initTaskSelectors(){
+/* task selectors — rebuilt when the language changes */
+function initTaskSelectors(){
   const a = P("newTask"), b = P("pTask");
-  Object.entries(TASKS).forEach(([k, v]) => {
-    const o1 = document.createElement("option"); o1.value = k; o1.textContent = v.label; a.appendChild(o1);
-    const o2 = document.createElement("option"); o2.value = k; o2.textContent = v.label; b.appendChild(o2);
+  const keepA = a.value, keepB = b.value;
+  a.innerHTML = ""; b.innerHTML = "";
+  Object.keys(TASKS).forEach(k => {
+    const o1 = document.createElement("option"); o1.value = k; o1.textContent = taskLabel(k); a.appendChild(o1);
+    const o2 = document.createElement("option"); o2.value = k; o2.textContent = taskLabel(k); b.appendChild(o2);
   });
-})();
+  if(keepA) a.value = keepA;
+  if(keepB) b.value = keepB;
+}
+
+/* everything drawn or built by script has to be regenerated on a language switch */
+function rebuildDynamicText(){
+  initTaskSelectors();
+  renderCamList(); renderRoiList(); renderModels();
+  syncProps(); syncRuntimeUi();
+  P("diagList").innerHTML = ""; P("diagBand").textContent = "";
+  lastSizeText = "";
+  updatePreview(); invalidate();
+}
+P("langTh").onclick = () => setLang("th", true);
+P("langEn").onclick = () => setLang("en", true);
 P("projName").oninput = () => state.project = P("projName").value;
 P("chkGuide").onchange = invalidate;
 P("chkLabels").onchange = invalidate;
 
 /* boot — everything above is defined by now, so nothing here can half-run */
+initLang();
+initTaskSelectors();
 state.cameras = [newCamera(1)];
 syncRuntimeUi();
 resize();
