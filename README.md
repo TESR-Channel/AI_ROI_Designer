@@ -8,7 +8,7 @@
 
 ## เปิดใช้งาน
 
-**บนเว็บ:** `https://tesr-channel.github.io/AI_ROI_Designer/`
+**บนเว็บ:** https://tesr-channel.github.io/AI_ROI_Designer
 
 **ออฟไลน์:** ดาวน์โหลด `index.html` ไฟล์เดียว แล้วดับเบิลคลิก ใช้ได้ครบเหมือนกัน
 
