@@ -36,10 +36,6 @@
 
 หรือถ้าไม่อยากใช้ Actions: ที่ **Settings → Pages** เลือก **Deploy from a branch** → `main` → `/ (root)` ก็ได้เหมือนกัน ไฟล์ `.nojekyll` มีไว้กัน Jekyll เข้ามายุ่งกับไฟล์
 
-### อัปเดตเวอร์ชันใหม่
-
-แทนที่ `index.html` ด้วยไฟล์ `roi_designer.html` ตัวใหม่ (เปลี่ยนชื่อเป็น `index.html`) แล้ว push
-
 ---
 
 ## ทำไมควรใช้ผ่าน Pages มากกว่าเปิดไฟล์ตรง ๆ
