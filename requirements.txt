@@ -1,0 +1,15 @@
+# --- required ---------------------------------------------------------
+opencv-python>=4.5        # Raspberry Pi: sudo apt install python3-opencv is faster
+numpy>=1.20
+
+# --- models -----------------------------------------------------------
+# Models added in TESR ROI Studio are .onnx, and .onnx needs only this:
+# onnxruntime>=1.16        # CPU, works on Pi / Jetson / PC  (~50 MB)
+# onnxruntime-gpu>=1.16    # PC or Jetson with CUDA
+# ultralytics>=8.0         # only if you keep a .pt model instead of exporting to .onnx
+
+# --- optional, install only what your ROI tasks need -------------------
+# pytesseract>=0.3.10     # ocr_text  (also needs the Tesseract engine on the OS)
+# easyocr>=1.7            # ocr_text  (heavier, works offline, GPU optional)
+# pyzbar>=0.1.9           # 1D barcode (needs libzbar0 on Linux)
+# paho-mqtt>=1.6          # MQTT output to Node-RED / broker
