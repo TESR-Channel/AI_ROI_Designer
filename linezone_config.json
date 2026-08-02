@@ -1,0 +1,147 @@
+{
+  "schema": "tesr.roi.v1",
+  "project": "Line & Zone Demo",
+  "runtime": {
+    "loop_fps": 30,
+    "show_window": false,
+    "print_console": true,
+    "console": "summary"
+  },
+  "cameras": [
+    {
+      "id": "cam1",
+      "name": "Gate",
+      "source": "0",
+      "width": 640,
+      "height": 480,
+      "scale": {
+        "ref_points": [
+          [
+            0.375,
+            0.9583333333333334
+          ],
+          [
+            0.625,
+            0.9583333333333334
+          ]
+        ],
+        "ref_length": 80.0,
+        "unit": "mm"
+      },
+      "rois": [
+        {
+          "id": "lvl",
+          "name": "tank_level",
+          "enabled": true,
+          "task": "level_line",
+          "shape": "line",
+          "output_key": "tank_level",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "points": [
+            [
+              0.109375,
+              0.8541666666666666
+            ],
+            [
+              0.109375,
+              0.14583333333333334
+            ]
+          ],
+          "params": {
+            "edge": "auto",
+            "smooth": 9,
+            "min_contrast": 6,
+            "value_at_start": 0,
+            "value_at_end": 1000,
+            "unit": "L",
+            "decimals": 0
+          }
+        },
+        {
+          "id": "msr",
+          "name": "part_width",
+          "enabled": true,
+          "task": "measure_line",
+          "shape": "line",
+          "output_key": "part_width",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "points": [
+            [
+              0.3125,
+              0.8541666666666666
+            ],
+            [
+              0.6875,
+              0.8541666666666666
+            ]
+          ],
+          "params": {
+            "mode": "outer",
+            "min_contrast": 12,
+            "smooth": 5,
+            "decimals": 2
+          }
+        },
+        {
+          "id": "gate",
+          "name": "door_gate",
+          "enabled": true,
+          "task": "line_count",
+          "shape": "line",
+          "output_key": "door",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "points": [
+            [
+              0.62,
+              0.15
+            ],
+            [
+              0.62,
+              0.85
+            ]
+          ],
+          "params": {
+            "label_in": "in",
+            "label_out": "out",
+            "report": "all"
+          }
+        },
+        {
+          "id": "zone",
+          "name": "waiting_area",
+          "enabled": true,
+          "task": "zone_count",
+          "shape": "polygon",
+          "output_key": "waiting",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "points": [
+            [
+              0.3,
+              0.3
+            ],
+            [
+              0.58,
+              0.3
+            ],
+            [
+              0.58,
+              0.7
+            ],
+            [
+              0.3,
+              0.7
+            ]
+          ],
+          "params": {
+            "anchor": "centroid"
+          }
+        }
+      ]
+    }
+  ],
+  "_note": "Shapes and parameters for the four line/zone tasks. Point 'source' at your own camera or video, and set 'detector' to your .onnx model before the counting tasks will work."
+}

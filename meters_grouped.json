@@ -1,0 +1,313 @@
+{
+  "schema": "tesr.roi.v1",
+  "project": "Two Meters",
+  "runtime": {
+    "loop_fps": 10,
+    "show_window": false,
+    "print_console": true,
+    "csv_log": "",
+    "jsonl_log": ""
+  },
+  "cameras": [
+    {
+      "id": "cam1",
+      "name": "Camera 1",
+      "source": "../examples/meters.jpg",
+      "width": 760,
+      "height": 600,
+      "rotate": 0,
+      "rois": [
+        {
+          "id": "roi_t0",
+          "name": "digits_1",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_1",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.2726,
+            "y": 0.1967,
+            "w": 0.0443,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_top"
+        },
+        {
+          "id": "roi_t1",
+          "name": "digits_2",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_2",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.344,
+            "y": 0.1967,
+            "w": 0.0443,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_top"
+        },
+        {
+          "id": "roi_t2",
+          "name": "digits_3",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_3",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.4154,
+            "y": 0.1967,
+            "w": 0.0443,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_top"
+        },
+        {
+          "id": "roi_t3",
+          "name": "digits_4",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_4",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.4868,
+            "y": 0.1967,
+            "w": 0.0443,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_top"
+        },
+        {
+          "id": "roi_t4",
+          "name": "digits_5",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_5",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.5583,
+            "y": 0.1967,
+            "w": 0.0443,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_top"
+        },
+        {
+          "id": "roi_t5",
+          "name": "digits_6",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_6",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.6297,
+            "y": 0.1967,
+            "w": 0.0443,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_top"
+        },
+        {
+          "id": "roi_b0",
+          "name": "digits_7",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_7",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.2868,
+            "y": 0.5633,
+            "w": 0.062,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_bottom"
+        },
+        {
+          "id": "roi_b1",
+          "name": "digits_8",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_8",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.3868,
+            "y": 0.5633,
+            "w": 0.062,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_bottom"
+        },
+        {
+          "id": "roi_b2",
+          "name": "digits_9",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_9",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.4868,
+            "y": 0.5633,
+            "w": 0.062,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_bottom"
+        },
+        {
+          "id": "roi_b3",
+          "name": "digits_10",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "digits_10",
+          "stable_frames": 1,
+          "every_n_frames": 1,
+          "upscale_to": 160,
+          "rect": {
+            "x": 0.5868,
+            "y": 0.5633,
+            "w": 0.062,
+            "h": 0.1567,
+            "angle": 0
+          },
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": true,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 1,
+            "decimals": 0,
+            "unit": "",
+            "as_number": false
+          },
+          "group": "meter_bottom"
+        }
+      ]
+    }
+  ]
+}

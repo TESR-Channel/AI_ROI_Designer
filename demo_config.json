@@ -1,0 +1,113 @@
+{
+  "schema": "tesr.roi.v1",
+  "project": "Demo - Machine Display Reader",
+  "runtime": {
+    "loop_fps": 5,
+    "show_window": false,
+    "print_console": true,
+    "csv_log": "",
+    "jsonl_log": ""
+  },
+  "cameras": [
+    {
+      "id": "cam1",
+      "name": "Line-1 Panel",
+      "source": "../examples/sample_machine.jpg",
+      "width": 1280,
+      "height": 720,
+      "rotate": 0,
+      "rois": [
+        {
+          "id": "roi_1",
+          "name": "counter",
+          "enabled": true,
+          "task": "digits_7seg",
+          "output_key": "counter",
+          "stable_frames": 1,
+          "rect": {
+            "x": 0.328,
+            "y": 0.458,
+            "w": 0.406,
+            "h": 0.264,
+            "angle": -8
+          },
+          "upscale_to": 160,
+          "params": {
+            "threshold_mode": "otsu",
+            "invert": false,
+            "blur": 3,
+            "min_fill": 0.5,
+            "split": "auto",
+            "digits": 4,
+            "decimals": 1,
+            "unit": "pcs",
+            "as_number": true
+          }
+        },
+        {
+          "id": "roi_2",
+          "name": "lot_qr",
+          "enabled": true,
+          "task": "barcode_qr",
+          "output_key": "lot",
+          "rect": {
+            "x": 0.77,
+            "y": 0.1,
+            "w": 0.17,
+            "h": 0.29,
+            "angle": 0
+          },
+          "params": {
+            "qr": true,
+            "barcode": true
+          },
+          "stable_frames": 1
+        },
+        {
+          "id": "roi_3",
+          "name": "alarm_lamp",
+          "enabled": true,
+          "task": "color_check",
+          "output_key": "alarm",
+          "rect": {
+            "x": 0.078,
+            "y": 0.69,
+            "w": 0.156,
+            "h": 0.21,
+            "angle": 0
+          },
+          "params": {
+            "h_min": 0,
+            "h_max": 10,
+            "s_min": 120,
+            "v_min": 80,
+            "s_max": 255,
+            "v_max": 255,
+            "min_ratio": 0.3,
+            "output": "bool"
+          },
+          "stable_frames": 1
+        },
+        {
+          "id": "roi_4",
+          "name": "conveyor",
+          "enabled": true,
+          "task": "presence_diff",
+          "output_key": "motion",
+          "rect": {
+            "x": 0.05,
+            "y": 0.05,
+            "w": 0.3,
+            "h": 0.15,
+            "angle": 0
+          },
+          "params": {
+            "sensitivity": 25,
+            "min_ratio": 0.05
+          },
+          "stable_frames": 1
+        }
+      ]
+    }
+  ]
+}

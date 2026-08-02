@@ -48,8 +48,15 @@ except ImportError:  # pragma: no cover
     )
     raise
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 SCHEMA = "tesr.roi.v1"
+
+# The line and zone engine lives in its own module so it can be tested on its
+# own; the runner works with or without it present.
+try:
+    import tesr_line_engine as LINE
+except ImportError:  # pragma: no cover
+    LINE = None
 
 # --------------------------------------------------------------------------
 # small helpers
@@ -1043,7 +1050,42 @@ def task_color(crop, roi):
         cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
 
+# Tasks that measure or count across the whole frame rather than inside a crop.
+# A counting line only means anything in the coordinates it was drawn on, so
+# these receive the frame itself plus a context carrying the camera scale.
+FRAME_TASKS = ("level_line", "measure_line", "line_count", "zone_count")
+
+
+def task_level_line(frame, roi, ctx):
+    return LINE.task_level(frame, roi, ctx)
+
+
+def task_measure_line(frame, roi, ctx):
+    return LINE.task_measure(frame, roi, ctx)
+
+
+def task_line_count(frame, roi, ctx):
+    counter = ctx["counters"].get(roi["id"])
+    if counter is None:
+        counter = ctx["counters"][roi["id"]] = LINE.LineCounter(roi)
+    counter.update(ctx["tracks"], frame.shape[1], frame.shape[0])
+    v = counter.value()
+    key = (roi.get("params") or {}).get("report", "net")
+    value = v if key == "all" else v.get(key, v["net"])
+    return value, 1.0, {"counts": v}
+
+
+def task_zone_count(frame, roi, ctx):
+    h, w = frame.shape[:2]
+    n, names = LINE.zone_count(roi, ctx["tracks"], w, h)
+    return n, 1.0, {"classes": names}
+
+
 TASKS = {
+    "level_line": task_level_line,
+    "measure_line": task_measure_line,
+    "line_count": task_line_count,
+    "zone_count": task_zone_count,
     "digits_7seg": task_digits,
     "ocr_text": task_ocr,
     "yolo_detect": task_yolo_detect,
@@ -1052,6 +1094,22 @@ TASKS = {
     "presence_diff": task_presence,
     "color_check": task_color,
 }
+
+
+def detect_frame(frame, det):
+    """One inference per frame, shared by every line and zone on that camera.
+
+    Running the model once and handing the boxes to each shape is the difference
+    between a Pi keeping up and a Pi falling over.
+    """
+    if not det or not det.get("path"):
+        return []
+    roi = {"model": det, "params": {"output": "items"}}
+    if str(det["path"]).lower().endswith(".onnx"):
+        value, _, _ = onnx_detect(frame, roi)
+    else:
+        value, _, _ = task_yolo_detect(frame, roi)
+    return value if isinstance(value, list) else []
 
 
 # --------------------------------------------------------------------------
@@ -1094,11 +1152,11 @@ class OutputBus:
                 log("MQTT disabled (%s)" % exc, "WARN")
                 self.mqtt = None
 
-    def publish(self, roi, key, value, conf, changed):
+    def publish(self, roi, key, value, conf, changed, echo=True):
         ts = now_iso()
         rec = {"time": ts, "project": self.project, "camera": self.cam_id,
                "roi": roi["name"], "key": key, "value": value, "conf": round(conf, 3)}
-        if self.rt.get("print_console"):
+        if echo and self.rt.get("print_console"):
             print("%s  %-14s %-10s = %s  (conf %.2f)"
                   % (ts, roi["name"], key, value, conf), flush=True)
         if self.jsonl:
@@ -1140,6 +1198,75 @@ class OutputBus:
 
 
 # --------------------------------------------------------------------------
+# grouping: several single-digit ROIs -> one reading
+# --------------------------------------------------------------------------
+
+def roi_center(rect):
+    return (rect["x"] + rect["w"] / 2.0, rect["y"] + rect["h"] / 2.0)
+
+
+def has_rect(roi):
+    return roi.get("shape", "rect") == "rect" and isinstance(roi.get("rect"), dict)
+
+
+def build_groups(rois, auto=False):
+    """Return [(group_name, [roi, ...])] with members ordered left to right.
+
+    A ROI joins a group either by carrying an explicit "group" field, or - when
+    --auto-group is on - by sitting on the same row as its neighbours. Rows are
+    found by clustering the vertical centres, so one ROI per digit still reads
+    out as a single number without any hand editing.
+    """
+    explicit, loose = {}, []
+    for r in rois:
+        g = r.get("group")
+        if g:
+            explicit.setdefault(g, []).append(r)
+        else:
+            loose.append(r)
+
+    groups = [(name, sorted(members, key=lambda r: roi_center(r["rect"])[0]))
+              for name, members in explicit.items()]
+
+    if auto and loose:
+        digits = [r for r in loose if r.get("task") == "digits_7seg" and has_rect(r)]
+        if len(digits) >= 2:
+            heights = sorted(r["rect"]["h"] for r in digits)
+            tol = max(0.01, heights[len(heights) // 2] * 0.6)
+            rows = []
+            for r in sorted(digits, key=lambda r: roi_center(r["rect"])[1]):
+                cy = roi_center(r["rect"])[1]
+                if rows and abs(cy - rows[-1][0]) <= tol:
+                    rows[-1][1].append(r)
+                    rows[-1][0] = sum(roi_center(x["rect"])[1] for x in rows[-1][1]) / len(rows[-1][1])
+                else:
+                    rows.append([cy, [r]])
+            for i, (_, members) in enumerate(rows):
+                if len(members) < 2:
+                    continue          # a lone digit is not a reading
+                groups.append(("row%d" % (i + 1),
+                               sorted(members, key=lambda r: roi_center(r["rect"])[0])))
+    return groups
+
+
+def group_value(members, results):
+    """Concatenate the members' readings. Any unreadable digit makes the whole
+    reading unreliable, so it is reported rather than quietly dropped."""
+    parts, ok, confs = [], True, []
+    for r in members:
+        v = results.get(r["id"], {}).get("value")
+        c = results.get(r["id"], {}).get("conf", 0.0)
+        if v is None or v == "" or (isinstance(v, str) and "?" in v):
+            parts.append("?")
+            ok = False
+        else:
+            parts.append(str(v))
+        confs.append(c)
+    text = "".join(parts)
+    return text, ok, (float(np.mean(confs)) if confs else 0.0)
+
+
+# --------------------------------------------------------------------------
 # drawing
 # --------------------------------------------------------------------------
 
@@ -1150,6 +1277,7 @@ TESR_GOLD = (129, 204, 230)     # #E6CC81
 TESR_GOLD_DEEP = (73, 123, 146)  # #927B49
 INK = (27, 27, 27)              # #1B1B1B
 WHITE = (242, 242, 242)         # #F2F2F2
+GREY = (154, 154, 154)          # #9A9A9A
 
 TASK_COLOUR = {
     "digits_7seg": TESR_GOLD,
@@ -1159,6 +1287,10 @@ TASK_COLOUR = {
     "barcode_qr": (224, 211, 127),   # #7FD3E0
     "presence_diff": (127, 201, 134),  # #86C97F
     "color_check": (216, 155, 200),  # #C89BD8
+    "level_line": (224, 180, 90),    # water blue-gold
+    "measure_line": TESR_GOLD,
+    "line_count": (110, 220, 250),   # counting gate
+    "zone_count": (150, 210, 140),   # occupancy zone
 }
 
 
@@ -1170,31 +1302,147 @@ def draw_mark(img, x, y, r):
     cv2.circle(img, (x, y), max(1, r // 3), TESR_RED, -1, cv2.LINE_AA)
 
 
-def draw_overlay(frame, cam, results, fps):
+def _text(img, s, org, scale, colour, thick=1):
+    cv2.putText(img, s, org, cv2.FONT_HERSHEY_SIMPLEX, scale, colour, thick, cv2.LINE_AA)
+
+
+def _panel(img, x, y, w, h, alpha=0.78):
+    """Dark translucent block so the panel stays readable over any scene."""
+    x, y = max(0, x), max(0, y)
+    w = min(w, img.shape[1] - x)
+    h = min(h, img.shape[0] - y)
+    if w <= 0 or h <= 0:
+        return
+    roi = img[y:y + h, x:x + w]
+    roi[:] = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, INK, np.uint8), alpha, 0)
+
+
+def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=None):
+    """Boxes carry only their reading; names and confidences live in the panel.
+
+    With one ROI per digit the boxes sit shoulder to shoulder, so a name label
+    on each one overlaps its neighbours and nothing can be read. The value goes
+    inside the box, an index number sits in the corner, and the panel spells out
+    index, name, value and confidence.
+    """
     h, w = frame.shape[:2]
-    for roi in cam["rois"]:
-        if not roi.get("enabled", True):
-            continue
-        pts = roi_corners(roi["rect"], w, h).astype(int)
-        r = results.get(roi["id"], {})
+    rois = [r for r in cam["rois"] if r.get("enabled", True)]
+
+    for i, roi in enumerate(rois, 1):
+        res = results.get(roi["id"], {})
+        val = res.get("value")
+        readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
         base = TASK_COLOUR.get(roi["task"], TESR_GOLD)
-        colour = base if r.get("value") not in (None, "", False) else TESR_RED
-        cv2.polylines(frame, [pts], True, colour, 2, cv2.LINE_AA)
-        label = "%s: %s" % (roi["name"], r.get("value", "-"))
-        x, y = pts[0]
-        cv2.rectangle(frame, (x, max(0, y - 20)), (x + 12 * len(label), y), INK, -1)
-        cv2.rectangle(frame, (x, max(0, y - 20)), (x + 3, y), colour, -1)
-        cv2.putText(frame, label, (x + 7, max(12, y - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+        colour = base if readable else TESR_RED
+        shape = roi.get("shape", "rect")
+
+        if shape == "line" and roi.get("points"):
+            a, b = [(int(px * w), int(py * h)) for px, py in roi["points"][:2]]
+            cv2.line(frame, a, b, colour, 2, cv2.LINE_AA)
+            for e in (a, b):
+                cv2.circle(frame, e, 4, colour, -1, cv2.LINE_AA)
+            if roi["task"] == "line_count":
+                # the arrow shows which way counts as "in"; what you see is counted
+                mx, my = (a[0] + b[0]) // 2, (a[1] + b[1]) // 2
+                nx, ny = LINE.gate_normal(a, b) if LINE else (0, 0)
+                if (roi.get("params") or {}).get("invert"):
+                    nx, ny = -nx, -ny
+                cv2.arrowedLine(frame, (mx, my), (int(mx + nx * 34), int(my + ny * 34)),
+                                TESR_GOLD, 2, cv2.LINE_AA, tipLength=0.35)
+            pts = np.array([a, b], np.int32)
+        elif shape == "polygon" and roi.get("points"):
+            pts = np.array([[int(px * w), int(py * h)] for px, py in roi["points"]], np.int32)
+            overlay = frame.copy()
+            cv2.fillPoly(overlay, [pts], colour)
+            cv2.addWeighted(overlay, 0.16, frame, 0.84, 0, frame)
+            cv2.polylines(frame, [pts], True, colour, 2, cv2.LINE_AA)
+        else:
+            pts = roi_corners(roi["rect"], w, h).astype(int)
+            cv2.polylines(frame, [pts], True, colour, 2, cv2.LINE_AA)
+
+        x0, y0 = pts[:, 0].min(), pts[:, 1].min()
+        x1, y1 = pts[:, 0].max(), pts[:, 1].max()
+        bw, bh = x1 - x0, y1 - y0
+
+        # index tag in the corner, always small enough to fit
+        _panel(frame, x0, y0, 18, 14, 0.85)
+        _text(frame, str(i), (x0 + 4, y0 + 11), 0.36, TESR_GOLD)
+
+        # the reading itself, inside the box so neighbours never collide
+        s = "-" if val in (None, "") else str(val)
+        if shape == "line":
+            (tw, th), _ = cv2.getTextSize(s[:14], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            tx = min(w - tw - 6, max(4, int(pts[:, 0].mean()) + 12))
+            ty = max(th + 30, int(pts[:, 1].min()) + th + 6)
+            _panel(frame, tx - 5, ty - th - 5, tw + 10, th + 10, 0.7)
+            _text(frame, s[:14], (tx, ty), 0.6, WHITE if readable else TESR_RED, 2)
+        elif len(s) <= 4 and bw > 16 and bh > 20:
+            scale = max(0.5, min(1.6, bh / 45.0))
+            (tw, th), _ = cv2.getTextSize(s, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+            tx, ty = x0 + (bw - tw) // 2, y1 - 4
+            _panel(frame, tx - 4, ty - th - 4, tw + 8, th + 8, 0.6)
+            _text(frame, s, (tx, ty), scale, WHITE if readable else TESR_RED, 2)
+
+    for tid, tr in (tracks or {}).items():
+        if tr.get("hits", 0) < 2:
+            continue
+        x1, y1, x2, y2 = [int(v) for v in tr["box"]]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), TESR_GOLD_DEEP, 1, cv2.LINE_AA)
+        _text(frame, "#%d %s" % (tid, tr.get("class", "")), (x1, max(10, y1 - 4)), 0.35, TESR_GOLD)
 
     cv2.rectangle(frame, (0, 0), (w, 26), INK, -1)
     cv2.line(frame, (0, 26), (w, 26), TESR_GOLD_DEEP, 1)
     draw_mark(frame, 14, 13, 8)
-    cv2.putText(frame, "TESR", (28, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.52, TESR_RED, 2, cv2.LINE_AA)
-    bar = "VISION RUNNER v%s | %s | %.1f FPS | q=quit  s=snapshot" % (
+    _text(frame, "TESR", (28, 18), 0.52, TESR_RED, 2)
+    bar = "VISION RUNNER v%s | %s | %.1f FPS | q=quit s=snapshot p=panel" % (
         VERSION, cam.get("name", cam["id"]), fps)
-    cv2.putText(frame, bar, (76, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 1, cv2.LINE_AA)
+    _text(frame, bar, (76, 18), 0.45, WHITE)
+
+    if show_panel:
+        strip = results_strip(w, rois, results, groups or [])
+        frame = np.vstack([frame, strip])
     return frame
+
+
+def results_strip(width, rois, results, groups):
+    """Every reading in one place, drawn on its own strip that is appended under
+    the frame. Adding space is safer than drawing on top: with ten ROIs spread
+    over the picture there is no free corner that is guaranteed to stay empty."""
+    line_h, pad, col_w = 18, 12, 200
+    ncol = max(1, min(4, (width - 2 * pad) // col_w))
+    rows = (len(rois) + ncol - 1) // ncol
+    ghead = 34 * len(groups)
+    height = 26 + ghead + rows * line_h + pad
+
+    strip = np.full((height, width, 3), 16, np.uint8)
+    cv2.line(strip, (0, 0), (width, 0), TESR_GOLD_DEEP, 1)
+
+    y = 18
+    _text(strip, "RESULTS", (pad, y), 0.42, TESR_GOLD_DEEP)
+
+    for name, members in groups:
+        text, ok, conf = group_value(members, results)
+        y += 32
+        _text(strip, name, (pad, y), 0.45, GREY)
+        _text(strip, text if text else "-", (pad + 78, y + 4), 0.95,
+              TESR_GOLD if ok else TESR_RED, 2)
+        (tw, _), _ = cv2.getTextSize(text or "-", cv2.FONT_HERSHEY_SIMPLEX, 0.95, 2)
+        _text(strip, "conf %.2f" % conf, (pad + 88 + tw, y + 2), 0.38, GREY)
+
+    y += 26
+    for idx, roi in enumerate(rois):
+        c, r = idx // rows, idx % rows
+        x = pad + c * col_w
+        yy = y + r * line_h
+        res = results.get(roi["id"], {})
+        val = res.get("value")
+        readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
+        s = "-" if val in (None, "") else str(val)
+        _text(strip, "%2d" % (idx + 1), (x, yy), 0.36, TESR_GOLD_DEEP)
+        _text(strip, roi["name"][:15], (x + 22, yy), 0.36, GREY)
+        _text(strip, s[:14], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
+        _text(strip, "%.2f" % res.get("conf", 0.0), (x + 165, yy), 0.32, GREY)
+    return strip
 
 
 def debug_strip(debugs, width):
@@ -1226,23 +1474,65 @@ def run(cfg, args):
     source = args.source or args.image or cam.get("source", "0")
     rt = cfg["runtime"]
     show = (rt.get("show_window", True) or args.test) and not args.headless
+    console = args.console or rt.get("console", "summary")
 
     rois = [r for r in cam.get("rois", []) if r.get("enabled", True)]
     if not rois:
         log("no enabled ROI for camera '%s'" % cam.get("id"), "WARN")
 
+    auto_group = args.auto_group or bool(rt.get("auto_group"))
+    groups = build_groups(rois, auto=auto_group)
+
     log("platform : %s %s | python %s | opencv %s"
         % (platform.system(), platform.machine(), platform.python_version(), cv2.__version__))
     log("camera   : %s (%s)  source=%r" % (cam.get("name"), cam.get("id"), source))
     log("rois     : %s" % ", ".join("%s[%s]" % (r["name"], r["task"]) for r in rois))
+    if groups:
+        log("groups   : %s" % ", ".join(
+            "%s(%s)" % (n, "+".join(r["name"] for r in ms)) for n, ms in groups))
+    elif not auto_group:
+        maybe = build_groups(rois, auto=True)
+        if maybe:
+            log("tip      : %d single-digit ROIs look like %d reading(s). "
+                "Add --auto-group to join them, or set \"group\" on each ROI in the config."
+                % (sum(len(ms) for _, ms in maybe), len(maybe)))
+    log("console  : %s" % console)
+
+    frame_rois = [r for r in rois if r.get("task") in FRAME_TASKS]
+    if frame_rois and LINE is None:
+        raise SystemExit("[FATAL] this config uses line/zone tasks but "
+                         "tesr_line_engine.py is not next to the runner")
+    needs_tracks = any(r.get("task") in ("line_count", "zone_count") for r in rois)
+    detector = cam.get("detector") or {}
+    if needs_tracks and not detector.get("path"):
+        log("line/zone counting needs a camera detector; add "
+            '"detector": {"path": "best.onnx", "class_names": [...]} to the camera', "WARN")
+
+    tracker = LINE.Tracker(**(cam.get("tracker") or {})) if (needs_tracks and LINE) else None
+    ctx = {"scale": cam.get("scale"), "counters": {}, "tracks": {}, "dets": []}
 
     src = FrameSource(source, cam.get("width", 0), cam.get("height", 0))
     bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
 
     stable = {r["id"]: {"cand": None, "count": 0, "last": None} for r in rois}
+    gstable = {n: None for n, _ in groups}
     results = {}
+    show_panel = not args.no_panel
     period = 1.0 / max(1.0, float(rt.get("loop_fps", 10)))
     frame_i, fps, t_prev = 0, 0.0, time.time()
+    last_summary, last_summary_at = None, 0.0
+    every = float(args.every or 0)
+
+    def summary_text():
+        """Every current reading on one line: groups first, then each ROI."""
+        bits = []
+        for name, members in groups:
+            text, ok, _ = group_value(members, results)
+            bits.append("%s=%s" % (name, text if text else "-"))
+        for r in rois:
+            v = results.get(r["id"], {}).get("value")
+            bits.append("%s=%s" % (r["name"], "-" if v in (None, "") else v))
+        return "  ".join(bits)
 
     try:
         while RUNNING:
@@ -1260,6 +1550,12 @@ def run(cfg, args):
                     frame = cv2.rotate(frame, code)
 
             frame_i += 1
+
+            # one detection pass per frame, shared by every counting shape
+            if tracker is not None:
+                ctx["dets"] = detect_frame(frame, detector)
+                ctx["tracks"] = tracker.update(ctx["dets"], frame.shape[1], frame.shape[0])
+
             debugs = []
             for roi in rois:
                 if frame_i % max(1, int(roi.get("every_n_frames", 1))) != 0:
@@ -1267,14 +1563,18 @@ def run(cfg, args):
                 fn = TASKS.get(roi["task"])
                 if fn is None:
                     continue
-                crop = crop_roi(frame, roi["rect"], upscale_to=roi.get("upscale_to", 0))
                 try:
-                    value, conf, dbg = fn(crop, roi)
+                    if roi["task"] in FRAME_TASKS:
+                        value, conf, dbg = fn(frame, roi, ctx)
+                    else:
+                        crop = crop_roi(frame, roi["rect"], upscale_to=roi.get("upscale_to", 0))
+                        value, conf, dbg = fn(crop, roi)
                 except Exception as exc:
                     log("ROI '%s' failed: %s" % (roi["name"], exc), "WARN")
                     continue
                 results[roi["id"]] = {"value": value, "conf": conf}
-                debugs.append((roi["name"], dbg))
+                if isinstance(dbg, np.ndarray):
+                    debugs.append((roi["name"], dbg))
 
                 st = stable[roi["id"]]
                 need = max(1, int(roi.get("stable_frames", 1)))
@@ -1285,7 +1585,8 @@ def run(cfg, args):
                 if st["count"] == need and value != st["last"]:
                     st["last"] = value
                     key = roi.get("output_key") or roi["name"]
-                    bus.publish(roi, key, value, conf, changed=True)
+                    bus.publish(roi, key, value, conf, changed=True,
+                                echo=(console == "change"))
                     if rt.get("save_on_change"):
                         ensure_dir(os.path.join(rt.get("save_dir", "captures"), "x"))
                         fn_ = os.path.join(rt.get("save_dir", "captures"),
@@ -1293,12 +1594,28 @@ def run(cfg, args):
                                                              datetime.now().strftime("%Y%m%d_%H%M%S")))
                         cv2.imwrite(fn_, frame)
 
+            # a completed group reading is published as its own value
+            for name, members in groups:
+                text, whole, gconf = group_value(members, results)
+                if whole and text != gstable[name]:
+                    gstable[name] = text
+                    bus.publish({"id": "grp_" + name, "name": name}, name, text, gconf,
+                                changed=True, echo=(console == "change"))
+
+            if console == "summary":
+                line = summary_text()
+                due = every > 0 and (time.time() - last_summary_at) >= every
+                if (every <= 0 and line != last_summary) or due:
+                    last_summary, last_summary_at = line, time.time()
+                    print("%s  %s" % (now_iso(), line), flush=True)
+
             dt = time.time() - t_prev
             t_prev = time.time()
             fps = 0.9 * fps + 0.1 * (1.0 / dt) if dt > 0 else fps
 
             if show:
-                view = draw_overlay(frame.copy(), cam, results, fps)
+                view = draw_overlay(frame.copy(), cam, results, fps, groups, show_panel,
+                                    ctx.get("tracks"))
                 cv2.imshow("TESR Vision Runner", view)
                 if args.test:
                     strip = debug_strip(debugs, view.shape[1])
@@ -1307,6 +1624,8 @@ def run(cfg, args):
                 k = cv2.waitKey(1) & 0xFF
                 if k in (ord("q"), 27):
                     break
+                if k == ord("p"):
+                    show_panel = not show_panel
                 if k == ord("s"):
                     ensure_dir("captures/x")
                     p = "captures/snapshot_%s.jpg" % datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1315,6 +1634,8 @@ def run(cfg, args):
 
             if args.once:
                 summary = {r["name"]: results.get(r["id"], {}).get("value") for r in rois}
+                for name, members in groups:
+                    summary[name] = group_value(members, results)[0]
                 print(json.dumps(summary, ensure_ascii=False, indent=2))
                 break
 
@@ -1449,6 +1770,15 @@ def main():
     ap.add_argument("--once", action="store_true", help="process one frame, print JSON, exit")
     ap.add_argument("--test", action="store_true", help="show preview window + ROI debug panel")
     ap.add_argument("--headless", action="store_true", help="no window (service / SSH / Jetson)")
+    ap.add_argument("--console", choices=["summary", "change", "none"],
+                    help="summary: one line with every reading (default) · "
+                         "change: one line per ROI as it changes · none: quiet")
+    ap.add_argument("--every", type=float, default=0,
+                    help="with --console summary, print every N seconds instead of on change")
+    ap.add_argument("--auto-group", dest="auto_group", action="store_true",
+                    help="join single-digit ROIs that sit on the same row into one reading")
+    ap.add_argument("--no-panel", dest="no_panel", action="store_true",
+                    help="hide the on-screen results panel")
     ap.add_argument("--calibrate", help="tune params of one ROI with live sliders")
     ap.add_argument("--list", action="store_true", help="list cameras and ROIs, then exit")
     ap.add_argument("--selftest", action="store_true", help="verify the digit reader offline")
@@ -1474,6 +1804,10 @@ def main():
             for r in c.get("rois", []):
                 print("   - %-16s %-14s key=%s enabled=%s"
                       % (r.get("name"), r.get("task"), r.get("output_key"), r.get("enabled", True)))
+            gs = build_groups([r for r in c.get("rois", []) if r.get("enabled", True)],
+                              auto=args.auto_group)
+            for name, members in gs:
+                print("   = group %-10s <- %s" % (name, " ".join(m["name"] for m in members)))
         return 0
 
     if args.calibrate:

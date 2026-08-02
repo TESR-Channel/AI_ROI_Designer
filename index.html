@@ -230,6 +230,27 @@
     </div>
 
     <div class="sec">
+      <h3><span data-i18n="scaleTitle"></span> <span class="tag" id="scaleTag"></span></h3>
+      <div class="body">
+        <div class="hint" data-i18n="scaleHint"></div>
+        <div class="row">
+          <div><label data-i18n="scaleLength"></label><input id="scLen" type="number" step="0.1" min="0"></div>
+          <div><label data-i18n="scaleUnit"></label><input id="scUnit" placeholder="mm"></div>
+        </div>
+        <button id="btnScaleDraw" data-i18n="scaleDraw"></button>
+        <button id="btnScaleClear" class="ghost" data-i18n="scaleClear"></button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3><span data-i18n="detectorTitle"></span></h3>
+      <div class="body">
+        <div class="hint" data-i18n="detectorHint"></div>
+        <div><label data-i18n="pModelUse"></label><select id="camDetector"></select></div>
+      </div>
+    </div>
+
+    <div class="sec">
       <h3><span data-i18n="myModels"></span> <span class="tag" id="modelCount">0</span></h3>
       <div class="body">
         <div class="list" id="modelList"></div>
@@ -272,6 +293,8 @@
       <button id="btnFit" data-i18n="fitScreen"></button>
       <button id="btnZoomIn">+</button>
       <button id="btnZoomOut">−</button>
+      <button id="btnAddPt" data-i18n="addPoint"></button>
+      <button id="btnDelPt" data-i18n="delPoint"></button>
       <button id="btnDup" data-i18n="duplicateRoi"></button>
       <button id="btnDel" data-i18n="deleteRoi"></button>
       <div class="grow" style="flex:1"></div>
@@ -314,7 +337,11 @@
             <option value="1" data-i18n="on"></option><option value="0" data-i18n="off"></option></select></div>
         </div>
         <div><label data-i18n="fieldTask"></label><select id="pTask"></select></div>
-        <div><label data-i18n="fieldOutputKey"></label><input id="pKey"></div>
+        <div class="row">
+          <div><label data-i18n="fieldOutputKey"></label><input id="pKey"></div>
+          <div><label data-i18n="fieldGroup"></label><input id="pGroup" data-i18n-ph="groupPh"></div>
+        </div>
+        <div class="hint" data-i18n="groupHint"></div>
         <div class="row">
           <div><label data-i18n="fieldStable"></label><input id="pStable" type="number" min="1" step="1"></div>
           <div><label data-i18n="fieldEvery"></label><input id="pEvery" type="number" min="1" step="1"></div>
@@ -483,8 +510,15 @@ except ImportError:  # pragma: no cover
     )
     raise
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 SCHEMA = "tesr.roi.v1"
+
+# The line and zone engine lives in its own module so it can be tested on its
+# own; the runner works with or without it present.
+try:
+    import tesr_line_engine as LINE
+except ImportError:  # pragma: no cover
+    LINE = None
 
 # --------------------------------------------------------------------------
 # small helpers
@@ -1478,7 +1512,42 @@ def task_color(crop, roi):
         cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
 
+# Tasks that measure or count across the whole frame rather than inside a crop.
+# A counting line only means anything in the coordinates it was drawn on, so
+# these receive the frame itself plus a context carrying the camera scale.
+FRAME_TASKS = ("level_line", "measure_line", "line_count", "zone_count")
+
+
+def task_level_line(frame, roi, ctx):
+    return LINE.task_level(frame, roi, ctx)
+
+
+def task_measure_line(frame, roi, ctx):
+    return LINE.task_measure(frame, roi, ctx)
+
+
+def task_line_count(frame, roi, ctx):
+    counter = ctx["counters"].get(roi["id"])
+    if counter is None:
+        counter = ctx["counters"][roi["id"]] = LINE.LineCounter(roi)
+    counter.update(ctx["tracks"], frame.shape[1], frame.shape[0])
+    v = counter.value()
+    key = (roi.get("params") or {}).get("report", "net")
+    value = v if key == "all" else v.get(key, v["net"])
+    return value, 1.0, {"counts": v}
+
+
+def task_zone_count(frame, roi, ctx):
+    h, w = frame.shape[:2]
+    n, names = LINE.zone_count(roi, ctx["tracks"], w, h)
+    return n, 1.0, {"classes": names}
+
+
 TASKS = {
+    "level_line": task_level_line,
+    "measure_line": task_measure_line,
+    "line_count": task_line_count,
+    "zone_count": task_zone_count,
     "digits_7seg": task_digits,
     "ocr_text": task_ocr,
     "yolo_detect": task_yolo_detect,
@@ -1487,6 +1556,22 @@ TASKS = {
     "presence_diff": task_presence,
     "color_check": task_color,
 }
+
+
+def detect_frame(frame, det):
+    """One inference per frame, shared by every line and zone on that camera.
+
+    Running the model once and handing the boxes to each shape is the difference
+    between a Pi keeping up and a Pi falling over.
+    """
+    if not det or not det.get("path"):
+        return []
+    roi = {"model": det, "params": {"output": "items"}}
+    if str(det["path"]).lower().endswith(".onnx"):
+        value, _, _ = onnx_detect(frame, roi)
+    else:
+        value, _, _ = task_yolo_detect(frame, roi)
+    return value if isinstance(value, list) else []
 
 
 # --------------------------------------------------------------------------
@@ -1529,11 +1614,11 @@ class OutputBus:
                 log("MQTT disabled (%s)" % exc, "WARN")
                 self.mqtt = None
 
-    def publish(self, roi, key, value, conf, changed):
+    def publish(self, roi, key, value, conf, changed, echo=True):
         ts = now_iso()
         rec = {"time": ts, "project": self.project, "camera": self.cam_id,
                "roi": roi["name"], "key": key, "value": value, "conf": round(conf, 3)}
-        if self.rt.get("print_console"):
+        if echo and self.rt.get("print_console"):
             print("%s  %-14s %-10s = %s  (conf %.2f)"
                   % (ts, roi["name"], key, value, conf), flush=True)
         if self.jsonl:
@@ -1575,6 +1660,75 @@ class OutputBus:
 
 
 # --------------------------------------------------------------------------
+# grouping: several single-digit ROIs -> one reading
+# --------------------------------------------------------------------------
+
+def roi_center(rect):
+    return (rect["x"] + rect["w"] / 2.0, rect["y"] + rect["h"] / 2.0)
+
+
+def has_rect(roi):
+    return roi.get("shape", "rect") == "rect" and isinstance(roi.get("rect"), dict)
+
+
+def build_groups(rois, auto=False):
+    """Return [(group_name, [roi, ...])] with members ordered left to right.
+
+    A ROI joins a group either by carrying an explicit "group" field, or - when
+    --auto-group is on - by sitting on the same row as its neighbours. Rows are
+    found by clustering the vertical centres, so one ROI per digit still reads
+    out as a single number without any hand editing.
+    """
+    explicit, loose = {}, []
+    for r in rois:
+        g = r.get("group")
+        if g:
+            explicit.setdefault(g, []).append(r)
+        else:
+            loose.append(r)
+
+    groups = [(name, sorted(members, key=lambda r: roi_center(r["rect"])[0]))
+              for name, members in explicit.items()]
+
+    if auto and loose:
+        digits = [r for r in loose if r.get("task") == "digits_7seg" and has_rect(r)]
+        if len(digits) >= 2:
+            heights = sorted(r["rect"]["h"] for r in digits)
+            tol = max(0.01, heights[len(heights) // 2] * 0.6)
+            rows = []
+            for r in sorted(digits, key=lambda r: roi_center(r["rect"])[1]):
+                cy = roi_center(r["rect"])[1]
+                if rows and abs(cy - rows[-1][0]) <= tol:
+                    rows[-1][1].append(r)
+                    rows[-1][0] = sum(roi_center(x["rect"])[1] for x in rows[-1][1]) / len(rows[-1][1])
+                else:
+                    rows.append([cy, [r]])
+            for i, (_, members) in enumerate(rows):
+                if len(members) < 2:
+                    continue          # a lone digit is not a reading
+                groups.append(("row%d" % (i + 1),
+                               sorted(members, key=lambda r: roi_center(r["rect"])[0])))
+    return groups
+
+
+def group_value(members, results):
+    """Concatenate the members' readings. Any unreadable digit makes the whole
+    reading unreliable, so it is reported rather than quietly dropped."""
+    parts, ok, confs = [], True, []
+    for r in members:
+        v = results.get(r["id"], {}).get("value")
+        c = results.get(r["id"], {}).get("conf", 0.0)
+        if v is None or v == "" or (isinstance(v, str) and "?" in v):
+            parts.append("?")
+            ok = False
+        else:
+            parts.append(str(v))
+        confs.append(c)
+    text = "".join(parts)
+    return text, ok, (float(np.mean(confs)) if confs else 0.0)
+
+
+# --------------------------------------------------------------------------
 # drawing
 # --------------------------------------------------------------------------
 
@@ -1585,6 +1739,7 @@ TESR_GOLD = (129, 204, 230)     # #E6CC81
 TESR_GOLD_DEEP = (73, 123, 146)  # #927B49
 INK = (27, 27, 27)              # #1B1B1B
 WHITE = (242, 242, 242)         # #F2F2F2
+GREY = (154, 154, 154)          # #9A9A9A
 
 TASK_COLOUR = {
     "digits_7seg": TESR_GOLD,
@@ -1594,6 +1749,10 @@ TASK_COLOUR = {
     "barcode_qr": (224, 211, 127),   # #7FD3E0
     "presence_diff": (127, 201, 134),  # #86C97F
     "color_check": (216, 155, 200),  # #C89BD8
+    "level_line": (224, 180, 90),    # water blue-gold
+    "measure_line": TESR_GOLD,
+    "line_count": (110, 220, 250),   # counting gate
+    "zone_count": (150, 210, 140),   # occupancy zone
 }
 
 
@@ -1605,31 +1764,147 @@ def draw_mark(img, x, y, r):
     cv2.circle(img, (x, y), max(1, r // 3), TESR_RED, -1, cv2.LINE_AA)
 
 
-def draw_overlay(frame, cam, results, fps):
+def _text(img, s, org, scale, colour, thick=1):
+    cv2.putText(img, s, org, cv2.FONT_HERSHEY_SIMPLEX, scale, colour, thick, cv2.LINE_AA)
+
+
+def _panel(img, x, y, w, h, alpha=0.78):
+    """Dark translucent block so the panel stays readable over any scene."""
+    x, y = max(0, x), max(0, y)
+    w = min(w, img.shape[1] - x)
+    h = min(h, img.shape[0] - y)
+    if w <= 0 or h <= 0:
+        return
+    roi = img[y:y + h, x:x + w]
+    roi[:] = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, INK, np.uint8), alpha, 0)
+
+
+def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=None):
+    """Boxes carry only their reading; names and confidences live in the panel.
+
+    With one ROI per digit the boxes sit shoulder to shoulder, so a name label
+    on each one overlaps its neighbours and nothing can be read. The value goes
+    inside the box, an index number sits in the corner, and the panel spells out
+    index, name, value and confidence.
+    """
     h, w = frame.shape[:2]
-    for roi in cam["rois"]:
-        if not roi.get("enabled", True):
-            continue
-        pts = roi_corners(roi["rect"], w, h).astype(int)
-        r = results.get(roi["id"], {})
+    rois = [r for r in cam["rois"] if r.get("enabled", True)]
+
+    for i, roi in enumerate(rois, 1):
+        res = results.get(roi["id"], {})
+        val = res.get("value")
+        readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
         base = TASK_COLOUR.get(roi["task"], TESR_GOLD)
-        colour = base if r.get("value") not in (None, "", False) else TESR_RED
-        cv2.polylines(frame, [pts], True, colour, 2, cv2.LINE_AA)
-        label = "%s: %s" % (roi["name"], r.get("value", "-"))
-        x, y = pts[0]
-        cv2.rectangle(frame, (x, max(0, y - 20)), (x + 12 * len(label), y), INK, -1)
-        cv2.rectangle(frame, (x, max(0, y - 20)), (x + 3, y), colour, -1)
-        cv2.putText(frame, label, (x + 7, max(12, y - 6)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+        colour = base if readable else TESR_RED
+        shape = roi.get("shape", "rect")
+
+        if shape == "line" and roi.get("points"):
+            a, b = [(int(px * w), int(py * h)) for px, py in roi["points"][:2]]
+            cv2.line(frame, a, b, colour, 2, cv2.LINE_AA)
+            for e in (a, b):
+                cv2.circle(frame, e, 4, colour, -1, cv2.LINE_AA)
+            if roi["task"] == "line_count":
+                # the arrow shows which way counts as "in"; what you see is counted
+                mx, my = (a[0] + b[0]) // 2, (a[1] + b[1]) // 2
+                nx, ny = LINE.gate_normal(a, b) if LINE else (0, 0)
+                if (roi.get("params") or {}).get("invert"):
+                    nx, ny = -nx, -ny
+                cv2.arrowedLine(frame, (mx, my), (int(mx + nx * 34), int(my + ny * 34)),
+                                TESR_GOLD, 2, cv2.LINE_AA, tipLength=0.35)
+            pts = np.array([a, b], np.int32)
+        elif shape == "polygon" and roi.get("points"):
+            pts = np.array([[int(px * w), int(py * h)] for px, py in roi["points"]], np.int32)
+            overlay = frame.copy()
+            cv2.fillPoly(overlay, [pts], colour)
+            cv2.addWeighted(overlay, 0.16, frame, 0.84, 0, frame)
+            cv2.polylines(frame, [pts], True, colour, 2, cv2.LINE_AA)
+        else:
+            pts = roi_corners(roi["rect"], w, h).astype(int)
+            cv2.polylines(frame, [pts], True, colour, 2, cv2.LINE_AA)
+
+        x0, y0 = pts[:, 0].min(), pts[:, 1].min()
+        x1, y1 = pts[:, 0].max(), pts[:, 1].max()
+        bw, bh = x1 - x0, y1 - y0
+
+        # index tag in the corner, always small enough to fit
+        _panel(frame, x0, y0, 18, 14, 0.85)
+        _text(frame, str(i), (x0 + 4, y0 + 11), 0.36, TESR_GOLD)
+
+        # the reading itself, inside the box so neighbours never collide
+        s = "-" if val in (None, "") else str(val)
+        if shape == "line":
+            (tw, th), _ = cv2.getTextSize(s[:14], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            tx = min(w - tw - 6, max(4, int(pts[:, 0].mean()) + 12))
+            ty = max(th + 30, int(pts[:, 1].min()) + th + 6)
+            _panel(frame, tx - 5, ty - th - 5, tw + 10, th + 10, 0.7)
+            _text(frame, s[:14], (tx, ty), 0.6, WHITE if readable else TESR_RED, 2)
+        elif len(s) <= 4 and bw > 16 and bh > 20:
+            scale = max(0.5, min(1.6, bh / 45.0))
+            (tw, th), _ = cv2.getTextSize(s, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+            tx, ty = x0 + (bw - tw) // 2, y1 - 4
+            _panel(frame, tx - 4, ty - th - 4, tw + 8, th + 8, 0.6)
+            _text(frame, s, (tx, ty), scale, WHITE if readable else TESR_RED, 2)
+
+    for tid, tr in (tracks or {}).items():
+        if tr.get("hits", 0) < 2:
+            continue
+        x1, y1, x2, y2 = [int(v) for v in tr["box"]]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), TESR_GOLD_DEEP, 1, cv2.LINE_AA)
+        _text(frame, "#%d %s" % (tid, tr.get("class", "")), (x1, max(10, y1 - 4)), 0.35, TESR_GOLD)
 
     cv2.rectangle(frame, (0, 0), (w, 26), INK, -1)
     cv2.line(frame, (0, 26), (w, 26), TESR_GOLD_DEEP, 1)
     draw_mark(frame, 14, 13, 8)
-    cv2.putText(frame, "TESR", (28, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.52, TESR_RED, 2, cv2.LINE_AA)
-    bar = "VISION RUNNER v%s | %s | %.1f FPS | q=quit  s=snapshot" % (
+    _text(frame, "TESR", (28, 18), 0.52, TESR_RED, 2)
+    bar = "VISION RUNNER v%s | %s | %.1f FPS | q=quit s=snapshot p=panel" % (
         VERSION, cam.get("name", cam["id"]), fps)
-    cv2.putText(frame, bar, (76, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 1, cv2.LINE_AA)
+    _text(frame, bar, (76, 18), 0.45, WHITE)
+
+    if show_panel:
+        strip = results_strip(w, rois, results, groups or [])
+        frame = np.vstack([frame, strip])
     return frame
+
+
+def results_strip(width, rois, results, groups):
+    """Every reading in one place, drawn on its own strip that is appended under
+    the frame. Adding space is safer than drawing on top: with ten ROIs spread
+    over the picture there is no free corner that is guaranteed to stay empty."""
+    line_h, pad, col_w = 18, 12, 200
+    ncol = max(1, min(4, (width - 2 * pad) // col_w))
+    rows = (len(rois) + ncol - 1) // ncol
+    ghead = 34 * len(groups)
+    height = 26 + ghead + rows * line_h + pad
+
+    strip = np.full((height, width, 3), 16, np.uint8)
+    cv2.line(strip, (0, 0), (width, 0), TESR_GOLD_DEEP, 1)
+
+    y = 18
+    _text(strip, "RESULTS", (pad, y), 0.42, TESR_GOLD_DEEP)
+
+    for name, members in groups:
+        text, ok, conf = group_value(members, results)
+        y += 32
+        _text(strip, name, (pad, y), 0.45, GREY)
+        _text(strip, text if text else "-", (pad + 78, y + 4), 0.95,
+              TESR_GOLD if ok else TESR_RED, 2)
+        (tw, _), _ = cv2.getTextSize(text or "-", cv2.FONT_HERSHEY_SIMPLEX, 0.95, 2)
+        _text(strip, "conf %.2f" % conf, (pad + 88 + tw, y + 2), 0.38, GREY)
+
+    y += 26
+    for idx, roi in enumerate(rois):
+        c, r = idx // rows, idx % rows
+        x = pad + c * col_w
+        yy = y + r * line_h
+        res = results.get(roi["id"], {})
+        val = res.get("value")
+        readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
+        s = "-" if val in (None, "") else str(val)
+        _text(strip, "%2d" % (idx + 1), (x, yy), 0.36, TESR_GOLD_DEEP)
+        _text(strip, roi["name"][:15], (x + 22, yy), 0.36, GREY)
+        _text(strip, s[:14], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
+        _text(strip, "%.2f" % res.get("conf", 0.0), (x + 165, yy), 0.32, GREY)
+    return strip
 
 
 def debug_strip(debugs, width):
@@ -1661,23 +1936,65 @@ def run(cfg, args):
     source = args.source or args.image or cam.get("source", "0")
     rt = cfg["runtime"]
     show = (rt.get("show_window", True) or args.test) and not args.headless
+    console = args.console or rt.get("console", "summary")
 
     rois = [r for r in cam.get("rois", []) if r.get("enabled", True)]
     if not rois:
         log("no enabled ROI for camera '%s'" % cam.get("id"), "WARN")
 
+    auto_group = args.auto_group or bool(rt.get("auto_group"))
+    groups = build_groups(rois, auto=auto_group)
+
     log("platform : %s %s | python %s | opencv %s"
         % (platform.system(), platform.machine(), platform.python_version(), cv2.__version__))
     log("camera   : %s (%s)  source=%r" % (cam.get("name"), cam.get("id"), source))
     log("rois     : %s" % ", ".join("%s[%s]" % (r["name"], r["task"]) for r in rois))
+    if groups:
+        log("groups   : %s" % ", ".join(
+            "%s(%s)" % (n, "+".join(r["name"] for r in ms)) for n, ms in groups))
+    elif not auto_group:
+        maybe = build_groups(rois, auto=True)
+        if maybe:
+            log("tip      : %d single-digit ROIs look like %d reading(s). "
+                "Add --auto-group to join them, or set \"group\" on each ROI in the config."
+                % (sum(len(ms) for _, ms in maybe), len(maybe)))
+    log("console  : %s" % console)
+
+    frame_rois = [r for r in rois if r.get("task") in FRAME_TASKS]
+    if frame_rois and LINE is None:
+        raise SystemExit("[FATAL] this config uses line/zone tasks but "
+                         "tesr_line_engine.py is not next to the runner")
+    needs_tracks = any(r.get("task") in ("line_count", "zone_count") for r in rois)
+    detector = cam.get("detector") or {}
+    if needs_tracks and not detector.get("path"):
+        log("line/zone counting needs a camera detector; add "
+            '"detector": {"path": "best.onnx", "class_names": [...]} to the camera', "WARN")
+
+    tracker = LINE.Tracker(**(cam.get("tracker") or {})) if (needs_tracks and LINE) else None
+    ctx = {"scale": cam.get("scale"), "counters": {}, "tracks": {}, "dets": []}
 
     src = FrameSource(source, cam.get("width", 0), cam.get("height", 0))
     bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
 
     stable = {r["id"]: {"cand": None, "count": 0, "last": None} for r in rois}
+    gstable = {n: None for n, _ in groups}
     results = {}
+    show_panel = not args.no_panel
     period = 1.0 / max(1.0, float(rt.get("loop_fps", 10)))
     frame_i, fps, t_prev = 0, 0.0, time.time()
+    last_summary, last_summary_at = None, 0.0
+    every = float(args.every or 0)
+
+    def summary_text():
+        """Every current reading on one line: groups first, then each ROI."""
+        bits = []
+        for name, members in groups:
+            text, ok, _ = group_value(members, results)
+            bits.append("%s=%s" % (name, text if text else "-"))
+        for r in rois:
+            v = results.get(r["id"], {}).get("value")
+            bits.append("%s=%s" % (r["name"], "-" if v in (None, "") else v))
+        return "  ".join(bits)
 
     try:
         while RUNNING:
@@ -1695,6 +2012,12 @@ def run(cfg, args):
                     frame = cv2.rotate(frame, code)
 
             frame_i += 1
+
+            # one detection pass per frame, shared by every counting shape
+            if tracker is not None:
+                ctx["dets"] = detect_frame(frame, detector)
+                ctx["tracks"] = tracker.update(ctx["dets"], frame.shape[1], frame.shape[0])
+
             debugs = []
             for roi in rois:
                 if frame_i % max(1, int(roi.get("every_n_frames", 1))) != 0:
@@ -1702,14 +2025,18 @@ def run(cfg, args):
                 fn = TASKS.get(roi["task"])
                 if fn is None:
                     continue
-                crop = crop_roi(frame, roi["rect"], upscale_to=roi.get("upscale_to", 0))
                 try:
-                    value, conf, dbg = fn(crop, roi)
+                    if roi["task"] in FRAME_TASKS:
+                        value, conf, dbg = fn(frame, roi, ctx)
+                    else:
+                        crop = crop_roi(frame, roi["rect"], upscale_to=roi.get("upscale_to", 0))
+                        value, conf, dbg = fn(crop, roi)
                 except Exception as exc:
                     log("ROI '%s' failed: %s" % (roi["name"], exc), "WARN")
                     continue
                 results[roi["id"]] = {"value": value, "conf": conf}
-                debugs.append((roi["name"], dbg))
+                if isinstance(dbg, np.ndarray):
+                    debugs.append((roi["name"], dbg))
 
                 st = stable[roi["id"]]
                 need = max(1, int(roi.get("stable_frames", 1)))
@@ -1720,7 +2047,8 @@ def run(cfg, args):
                 if st["count"] == need and value != st["last"]:
                     st["last"] = value
                     key = roi.get("output_key") or roi["name"]
-                    bus.publish(roi, key, value, conf, changed=True)
+                    bus.publish(roi, key, value, conf, changed=True,
+                                echo=(console == "change"))
                     if rt.get("save_on_change"):
                         ensure_dir(os.path.join(rt.get("save_dir", "captures"), "x"))
                         fn_ = os.path.join(rt.get("save_dir", "captures"),
@@ -1728,12 +2056,28 @@ def run(cfg, args):
                                                              datetime.now().strftime("%Y%m%d_%H%M%S")))
                         cv2.imwrite(fn_, frame)
 
+            # a completed group reading is published as its own value
+            for name, members in groups:
+                text, whole, gconf = group_value(members, results)
+                if whole and text != gstable[name]:
+                    gstable[name] = text
+                    bus.publish({"id": "grp_" + name, "name": name}, name, text, gconf,
+                                changed=True, echo=(console == "change"))
+
+            if console == "summary":
+                line = summary_text()
+                due = every > 0 and (time.time() - last_summary_at) >= every
+                if (every <= 0 and line != last_summary) or due:
+                    last_summary, last_summary_at = line, time.time()
+                    print("%s  %s" % (now_iso(), line), flush=True)
+
             dt = time.time() - t_prev
             t_prev = time.time()
             fps = 0.9 * fps + 0.1 * (1.0 / dt) if dt > 0 else fps
 
             if show:
-                view = draw_overlay(frame.copy(), cam, results, fps)
+                view = draw_overlay(frame.copy(), cam, results, fps, groups, show_panel,
+                                    ctx.get("tracks"))
                 cv2.imshow("TESR Vision Runner", view)
                 if args.test:
                     strip = debug_strip(debugs, view.shape[1])
@@ -1742,6 +2086,8 @@ def run(cfg, args):
                 k = cv2.waitKey(1) & 0xFF
                 if k in (ord("q"), 27):
                     break
+                if k == ord("p"):
+                    show_panel = not show_panel
                 if k == ord("s"):
                     ensure_dir("captures/x")
                     p = "captures/snapshot_%s.jpg" % datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1750,6 +2096,8 @@ def run(cfg, args):
 
             if args.once:
                 summary = {r["name"]: results.get(r["id"], {}).get("value") for r in rois}
+                for name, members in groups:
+                    summary[name] = group_value(members, results)[0]
                 print(json.dumps(summary, ensure_ascii=False, indent=2))
                 break
 
@@ -1884,6 +2232,15 @@ def main():
     ap.add_argument("--once", action="store_true", help="process one frame, print JSON, exit")
     ap.add_argument("--test", action="store_true", help="show preview window + ROI debug panel")
     ap.add_argument("--headless", action="store_true", help="no window (service / SSH / Jetson)")
+    ap.add_argument("--console", choices=["summary", "change", "none"],
+                    help="summary: one line with every reading (default) · "
+                         "change: one line per ROI as it changes · none: quiet")
+    ap.add_argument("--every", type=float, default=0,
+                    help="with --console summary, print every N seconds instead of on change")
+    ap.add_argument("--auto-group", dest="auto_group", action="store_true",
+                    help="join single-digit ROIs that sit on the same row into one reading")
+    ap.add_argument("--no-panel", dest="no_panel", action="store_true",
+                    help="hide the on-screen results panel")
     ap.add_argument("--calibrate", help="tune params of one ROI with live sliders")
     ap.add_argument("--list", action="store_true", help="list cameras and ROIs, then exit")
     ap.add_argument("--selftest", action="store_true", help="verify the digit reader offline")
@@ -1909,6 +2266,10 @@ def main():
             for r in c.get("rois", []):
                 print("   - %-16s %-14s key=%s enabled=%s"
                       % (r.get("name"), r.get("task"), r.get("output_key"), r.get("enabled", True)))
+            gs = build_groups([r for r in c.get("rois", []) if r.get("enabled", True)],
+                              auto=args.auto_group)
+            for name, members in gs:
+                print("   = group %-10s <- %s" % (name, " ".join(m["name"] for m in members)))
         return 0
 
     if args.calibrate:
@@ -1921,6 +2282,507 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+</script>
+
+<!-- the line and zone engine, exported alongside the runner when it is needed -->
+<script type="text/plain" id="lineSrc">#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+TESR line & zone engine
+=======================
+The geometry that a rectangle cannot express:
+
+  line     -> water / tank level, workpiece dimension, a counting gate
+  polygon  -> an area to count things in, or to ignore
+
+Everything here works on a whole frame rather than a crop, because a counting
+line only means something in the coordinate system of the picture it was drawn on.
+
+Kept dependency-free beyond OpenCV and numpy so it runs on a Raspberry Pi.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+try:
+    import cv2
+except ImportError:  # pragma: no cover
+    cv2 = None
+
+
+# --------------------------------------------------------------------------
+# geometry helpers - all shapes are stored normalised 0..1
+# --------------------------------------------------------------------------
+
+def denorm(points, w, h):
+    return np.array([[p[0] * w, p[1] * h] for p in points], dtype=np.float32)
+
+
+def line_length(points, w, h):
+    p = denorm(points, w, h)
+    return float(np.hypot(p[1, 0] - p[0, 0], p[1, 1] - p[0, 1]))
+
+
+def sample_profile(gray, points, w, h, thickness=5):
+    """Average brightness along a line, one value per pixel step.
+
+    Averaging across a few parallel offsets makes the reading far steadier than
+    a single-pixel scan: sensor noise and a scratch on the tank glass no longer
+    look like a water surface.
+    """
+    p = denorm(points, w, h)
+    (x0, y0), (x1, y1) = p[0], p[1]
+    n = max(2, int(round(np.hypot(x1 - x0, y1 - y0))))
+    t = np.linspace(0.0, 1.0, n)
+    xs, ys = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+
+    dx, dy = x1 - x0, y1 - y0
+    norm = np.hypot(dx, dy) or 1.0
+    nx, ny = -dy / norm, dx / norm            # unit normal to the line
+
+    half = max(0, int(thickness) // 2)
+    offsets = range(-half, half + 1) if half else [0]
+    acc = np.zeros(n, np.float64)
+    used = 0
+    H, W = gray.shape[:2]
+    for k in offsets:
+        sx = np.clip((xs + nx * k).round().astype(int), 0, W - 1)
+        sy = np.clip((ys + ny * k).round().astype(int), 0, H - 1)
+        acc += gray[sy, sx].astype(np.float64)
+        used += 1
+    return acc / max(1, used), t
+
+
+def smooth1d(a, k):
+    if k < 3:
+        return a
+    k = int(k) | 1
+    pad = k // 2
+    padded = np.pad(a, pad, mode="edge")
+    kern = np.ones(k) / k
+    return np.convolve(padded, kern, mode="valid")
+
+
+def point_in_polygon(pt, poly):
+    """Ray casting. poly is an (N,2) array of pixel coordinates."""
+    x, y = pt
+    inside = False
+    n = len(poly)
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if ((yi > y) != (yj > y)) and \
+           (x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-9) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def side_of_line(pt, a, b):
+    """Which side of the directed line a->b the point falls on: +1, -1 or 0."""
+    v = (b[0] - a[0]) * (pt[1] - a[1]) - (b[1] - a[1]) * (pt[0] - a[0])
+    if v > 0:
+        return 1
+    if v < 0:
+        return -1
+    return 0
+
+
+def gate_normal(a, b):
+    """The direction an object must travel for the crossing to count as "in".
+
+    Defined as the line rotated 90 degrees clockwise, so a gate drawn downwards
+    counts left-to-right traffic as coming in. The editor draws this arrow on
+    the line, so what you see is what gets counted - and `invert` flips it
+    without having to redraw anything.
+    """
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    n = np.hypot(dx, dy) or 1.0
+    return (dy / n, -dx / n)
+
+
+def side_of_gate(pt, a, b):
+    """+1 when the point lies on the side the "in" arrow points towards."""
+    nx, ny = gate_normal(a, b)
+    v = (pt[0] - a[0]) * nx + (pt[1] - a[1]) * ny
+    if v > 1e-9:
+        return 1
+    if v < -1e-9:
+        return -1
+    return 0
+
+
+def segments_intersect(p1, p2, p3, p4):
+    """Does segment p1p2 cross segment p3p4?"""
+    d1 = side_of_line(p1, p3, p4)
+    d2 = side_of_line(p2, p3, p4)
+    d3 = side_of_line(p3, p1, p2)
+    d4 = side_of_line(p4, p1, p2)
+    return d1 != d2 and d3 != d4
+
+
+# --------------------------------------------------------------------------
+# scale: pixels -> millimetres
+# --------------------------------------------------------------------------
+
+def px_per_unit(scale, w, h):
+    """A reference line of known real length gives the conversion factor.
+
+    Returns (factor, unit) or (None, "") when the camera has not been calibrated.
+    Without it every measurement is reported in pixels only, which is honest:
+    a length in millimetres that nobody calibrated would be a made-up number.
+    """
+    if not scale:
+        return None, ""
+    ref = scale.get("ref_points")
+    length = float(scale.get("ref_length") or 0)
+    if not ref or len(ref) != 2 or length <= 0:
+        return None, scale.get("unit", "")
+    px = line_length(ref, w, h)
+    if px <= 0:
+        return None, scale.get("unit", "")
+    return px / length, scale.get("unit", "mm")
+
+
+def _edges(mag, thr):
+    """Locate every edge along the profile as a fractional sample index.
+
+    Each run of samples above the threshold is one edge. Its position is the
+    centre of mass of that run, weighted by gradient strength. Blurring or
+    smoothing turns a sharp edge into a plateau several samples wide; picking
+    the first sample of that plateau pushes every measurement outward, and
+    picking any single sample of it quantises the answer. The centre of mass
+    handles both, and lands between samples where the edge actually is.
+
+    Returns [(position, peak_magnitude, peak_index), ...] left to right.
+    """
+    out = []
+    i, n = 0, len(mag)
+    while i < n:
+        if mag[i] < thr:
+            i += 1
+            continue
+        j = i
+        while j < n and mag[j] >= thr:
+            j += 1
+        seg = mag[i:j].astype(np.float64)
+        weight = seg.sum()
+        if weight > 0:
+            centre = float((np.arange(i, j) * seg).sum() / weight)
+        else:
+            centre = float(i)
+        peak = int(i + np.argmax(seg))
+        out.append((centre + 0.5, float(seg.max()), peak))   # +0.5: edges sit between samples
+        i = j
+    return out
+
+
+def _subpixel(mag, i):
+    """Parabolic fit through a peak and its neighbours -> fractional index."""
+    if 0 < i < len(mag) - 1:
+        a, b, c = float(mag[i - 1]), float(mag[i]), float(mag[i + 1])
+        denom = a - 2 * b + c
+        if abs(denom) > 1e-9:
+            delta = 0.5 * (a - c) / denom
+            if -1.0 < delta < 1.0:
+                return i + delta + 0.5
+    return i + 0.5
+
+
+# --------------------------------------------------------------------------
+# task: level along a line  (tank, silo, sight glass)
+# --------------------------------------------------------------------------
+
+def task_level(frame, roi, ctx):
+    """Find the surface along a line drawn from the EMPTY end to the FULL end.
+
+    The surface is the strongest brightness step along that line. Reported as a
+    percentage of the line, and converted to engineering units when the ROI
+    carries value_at_start / value_at_end.
+    """
+    p = roi.get("params") or {}
+    h, w = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    prof, t = sample_profile(gray, roi["points"], w, h, p.get("thickness", 7))
+    prof = smooth1d(prof, int(p.get("smooth", 9)))
+
+    grad = np.diff(prof)
+    if grad.size == 0:
+        return None, 0.0, {}
+
+    edge = p.get("edge", "auto")
+    if edge == "dark_to_light":
+        cand = np.maximum(grad, 0)
+    elif edge == "light_to_dark":
+        cand = np.maximum(-grad, 0)
+    else:
+        cand = np.abs(grad)
+
+    # ignore the very ends: the rim of the tank is a step too
+    margin = max(1, int(len(cand) * float(p.get("ignore_ends", 0.06))))
+    lo, hi = (margin, len(cand) - margin) if len(cand) > 2 * margin + 2 else (0, len(cand))
+    core = cand[lo:hi]
+    if core.size == 0:
+        return None, 0.0, {}
+    i = int(np.argmax(core)) + lo
+    strength = float(cand[i])
+
+    if strength < float(p.get("min_contrast", 6)):
+        return None, 0.0, {"reason": "no clear surface", "strength": strength}
+
+    # On a noisy or textured line every sample looks like a step. A genuine
+    # surface splits the line into two roughly uniform stretches - liquid on one
+    # side, air on the other - so test that model rather than trusting the peak.
+    split = i + 1
+    before, after = prof[:split], prof[split:]
+    if before.size < 3 or after.size < 3:
+        return None, 0.0, {"reason": "surface at the very end of the line"}
+    step = abs(float(before.mean()) - float(after.mean()))
+    spread = (float(before.std()) + float(after.std())) / 2.0
+    min_c = float(p.get("min_contrast", 6))
+    if step < min_c:
+        return None, 0.0, {"reason": "the two sides look the same",
+                           "step": round(step, 1)}
+    if step < spread * float(p.get("min_step_to_noise", 1.2)):
+        return None, 0.0, {"reason": "the line is too textured to trust",
+                           "step": round(step, 1), "spread": round(spread, 1)}
+
+    found = _edges(cand, max(float(p.get("min_contrast", 6)), strength * 0.5))
+    pos = min(found, key=lambda e: abs(e[2] - i))[0] if found else _subpixel(cand, i)
+    frac = float(np.clip(pos / max(1, len(prof) - 1), 0.0, 1.0))
+
+    # confidence: how far the winning step stands above the rest of the line
+    rest = np.delete(cand, slice(max(0, i - 2), i + 3))
+    base = float(np.percentile(rest, 90)) if rest.size else 0.0
+    conf = float(np.clip((strength - base) / max(4.0, strength), 0.0, 1.0))
+
+    v0, v1 = p.get("value_at_start"), p.get("value_at_end")
+    if v0 is not None and v1 is not None:
+        value = float(v0) + (float(v1) - float(v0)) * frac
+        value = round(value, int(p.get("decimals", 1)))
+        unit = p.get("unit", "")
+    else:
+        value = round(frac * 100.0, int(p.get("decimals", 1)))
+        unit = "%"
+
+    return value, conf, {"frac": frac, "index": i, "strength": strength, "unit": unit}
+
+
+# --------------------------------------------------------------------------
+# task: dimension between two edges along a line
+# --------------------------------------------------------------------------
+
+def task_measure(frame, roi, ctx):
+    """Distance between the first and last strong edge along the line.
+
+    Draw the line so it crosses the part completely, with background at both
+    ends. Returns pixels, plus real units when the camera has a scale reference.
+    """
+    p = roi.get("params") or {}
+    h, w = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    prof, t = sample_profile(gray, roi["points"], w, h, p.get("thickness", 5))
+    prof = smooth1d(prof, int(p.get("smooth", 5)))
+    grad = np.diff(prof)
+    if grad.size < 3:
+        return None, 0.0, {}
+
+    mag = np.abs(grad)
+    thr = float(p.get("min_contrast", 12))
+    edges = _edges(mag, thr)
+    if len(edges) < 2:
+        return None, 0.0, {"reason": "fewer than two edges", "max_grad": float(mag.max())}
+
+    if p.get("mode", "outer") == "outer":
+        e0, e1 = edges[0], edges[-1]
+    else:                                        # the strongest opposing pair
+        rising = [e for e in edges if grad[e[2]] > 0]
+        falling = [e for e in edges if grad[e[2]] < 0]
+        if not rising or not falling:
+            e0, e1 = edges[0], edges[-1]
+        else:
+            e0 = min(rising[0], falling[0], key=lambda e: e[0])
+            e1 = max(rising[-1], falling[-1], key=lambda e: e[0])
+
+    typical = float(np.median(mag)) + 1e-6
+    ratio = min(e0[1], e1[1]) / typical
+    if ratio < float(p.get("min_peak_ratio", 3.0)):
+        return None, 0.0, {"reason": "edges do not stand out from the texture",
+                           "ratio": round(ratio, 2)}
+
+    # the material between the two edges must differ from the background,
+    # otherwise two unrelated features are being measured as if they were a part
+    a, b = int(min(e0[0], e1[0])) + 1, int(max(e0[0], e1[0])) + 1
+    inside = prof[a:b]
+    outside = np.concatenate([prof[:a], prof[b:]])
+    if inside.size and outside.size:
+        step = abs(float(inside.mean()) - float(outside.mean()))
+        if step < float(p.get("min_contrast", 12)) * 0.5:
+            return None, 0.0, {"reason": "nothing solid between the edges",
+                               "step": round(step, 1)}
+
+    total_px = line_length(roi["points"], w, h)
+    n = max(1, len(prof) - 1)
+    span_px = abs(e1[0] - e0[0]) / n * total_px
+
+    factor, unit = px_per_unit(ctx.get("scale"), w, h)
+    if factor:
+        value = round(span_px / factor, int(p.get("decimals", 2)))
+    else:
+        value, unit = round(span_px, 1), "px"
+
+    conf = float(np.clip(min(e0[1], e1[1]) / 40.0, 0.0, 1.0))
+    return value, conf, {"px": span_px, "unit": unit,
+                         "i0": round(e0[0], 2), "i1": round(e1[0], 2),
+                         "edges": len(edges)}
+
+
+# --------------------------------------------------------------------------
+# a small tracker, enough to tell one person from the next between frames
+# --------------------------------------------------------------------------
+
+def iou(a, b):
+    x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+    x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    if inter <= 0:
+        return 0.0
+    ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+class Tracker:
+    """Greedy IoU matching with a centroid fallback.
+
+    Not a Kalman filter and not trying to be: for a doorway or a conveyor at a
+    sensible frame rate this is accurate and costs almost nothing on a Pi.
+    """
+
+    def __init__(self, iou_thr=0.3, max_age=12, max_dist=0.08):
+        self.iou_thr = iou_thr
+        self.max_age = max_age
+        self.max_dist = max_dist          # fraction of the frame diagonal
+        self.tracks = {}                  # id -> {box, centroid, age, hits, trail}
+        self._next = 1
+
+    def update(self, dets, w, h):
+        """dets: [{"box":[x1,y1,x2,y2], "class":name, "conf":float}] in pixels."""
+        diag = float(np.hypot(w, h)) or 1.0
+        for tr in self.tracks.values():
+            tr["age"] += 1
+            tr["matched"] = False
+
+        order = sorted(range(len(dets)), key=lambda i: -dets[i].get("conf", 0))
+        for di in order:
+            d = dets[di]
+            box = d["box"]
+            c = ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+            best, best_score = None, 0.0
+            for tid, tr in self.tracks.items():
+                if tr["matched"]:
+                    continue
+                score = iou(box, tr["box"])
+                if score < self.iou_thr:
+                    dist = np.hypot(c[0] - tr["centroid"][0], c[1] - tr["centroid"][1]) / diag
+                    score = (1.0 - dist / self.max_dist) * self.iou_thr if dist < self.max_dist else 0.0
+                if score > best_score:
+                    best, best_score = tid, score
+            if best is None:
+                tid = self._next
+                self._next += 1
+                self.tracks[tid] = {"box": box, "centroid": c, "age": 0, "hits": 1,
+                                    "prev": c, "class": d.get("class", ""), "matched": True}
+            else:
+                tr = self.tracks[best]
+                tr["prev"] = tr["centroid"]
+                tr["box"], tr["centroid"] = box, c
+                tr["age"], tr["hits"], tr["matched"] = 0, tr["hits"] + 1, True
+                tr["class"] = d.get("class", tr.get("class", ""))
+
+        for tid in [t for t, tr in self.tracks.items() if tr["age"] > self.max_age]:
+            del self.tracks[tid]
+        return self.tracks
+
+
+# --------------------------------------------------------------------------
+# task: counting across a line, with direction
+# --------------------------------------------------------------------------
+
+class LineCounter:
+    def __init__(self, roi):
+        p = roi.get("params") or {}
+        self.roi = roi
+        self.name_in = p.get("label_in", "in")
+        self.name_out = p.get("label_out", "out")
+        self.classes = p.get("classes") or []
+        self.invert = bool(p.get("invert"))
+        self.counts = {self.name_in: 0, self.name_out: 0}
+        self.seen = {}                    # track id -> last side
+
+    def update(self, tracks, w, h):
+        a, b = denorm(self.roi["points"], w, h)
+        crossed = []
+        alive = set()
+        for tid, tr in tracks.items():
+            if tr["hits"] < 2:
+                continue
+            if self.classes and tr.get("class") not in self.classes:
+                continue
+            alive.add(tid)
+            side = side_of_gate(tr["centroid"], a, b)
+            prev_side = self.seen.get(tid)
+            self.seen[tid] = side
+            if prev_side is None or side == 0 or prev_side == 0 or side == prev_side:
+                continue
+            # the centroid moved from one side to the other: only count it if the
+            # path actually passes between the endpoints, not off the end of the line
+            if not segments_intersect(tr["prev"], tr["centroid"], a, b):
+                continue
+            going_in = (side > 0)
+            if self.invert:
+                going_in = not going_in
+            key = self.name_in if going_in else self.name_out
+            self.counts[key] += 1
+            crossed.append((tid, key))
+        for tid in [t for t in self.seen if t not in tracks]:
+            del self.seen[tid]
+        return crossed
+
+    def value(self):
+        i, o = self.counts[self.name_in], self.counts[self.name_out]
+        return {self.name_in: i, self.name_out: o, "net": i - o, "total": i + o}
+
+
+# --------------------------------------------------------------------------
+# task: how many things are inside a polygon right now
+# --------------------------------------------------------------------------
+
+def zone_count(roi, tracks_or_dets, w, h, use_tracks=True):
+    poly = denorm(roi["points"], w, h)
+    p = roi.get("params") or {}
+    classes = p.get("classes") or []
+    anchor = p.get("anchor", "centroid")
+    n, names = 0, []
+    items = tracks_or_dets.values() if use_tracks else tracks_or_dets
+    for it in items:
+        cls = it.get("class", "")
+        if classes and cls not in classes:
+            continue
+        box = it["box"]
+        if anchor == "bottom":
+            pt = ((box[0] + box[2]) / 2.0, box[3])      # feet, for people on a floor
+        else:
+            pt = ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+        if point_in_polygon(pt, poly):
+            n += 1
+            names.append(cls)
+    return n, names
+
+
+if __name__ == "__main__":
+    print(__doc__)
 </script>
 
 <script>
@@ -1975,8 +2837,34 @@ th: {
   roiProps:"คุณสมบัติของกรอบ", fieldName:"ชื่อ", fieldEnabled:"ใช้งาน", on:"เปิด", off:"ปิด",
   fieldTask:"ชนิดงาน (task)", fieldOutputKey:"Output key ที่ส่งออก",
   fieldStable:"ยืนยันค่าซ้ำ (เฟรม)", fieldEvery:"ประมวลผลทุก N เฟรม", fieldAngle:"มุม °",
+  fieldGroup:"กลุ่ม", groupPh:"เช่น meter_top",
+  groupHint:"กรอบที่ใส่ชื่อกลุ่มเดียวกันจะถูกต่อเป็นตัวเลขชุดเดียวตอนอ่าน เรียงจากซ้ายไปขวาให้อัตโนมัติ เช่น 6 กรอบหลักละกรอบ รวมเป็น 225466",
 
   /* tasks */
+  task_level_line:"วัดระดับตามเส้น (ถัง/ไซโล)", task_measure_line:"วัดขนาดตามเส้น",
+  task_line_count:"นับข้ามเส้น (เข้า/ออก)", task_zone_count:"นับในพื้นที่",
+  addPoint:"+ จุด", delPoint:"− จุด",
+  selectPolygonFirst:"เลือกกรอบชนิดพื้นที่ก่อน", polygonMin:"พื้นที่ต้องมีอย่างน้อย 3 จุด",
+  levelHint:"ลากเส้นจากจุด <b>A = ระดับต่ำสุด</b> ไปยัง <b>B = ระดับสูงสุด</b> ระบบจะหาผิวของเหลวที่เป็นรอยต่อความสว่างที่ชัดที่สุดบนเส้นนั้น",
+  measureHint:"ลากเส้นให้ <b>ตัดผ่านชิ้นงานจนสุด</b> โดยให้ปลายทั้งสองข้างอยู่บนพื้นหลัง ระบบจะวัดระยะระหว่างขอบแรกกับขอบสุดท้าย",
+  countHint:"ลากเส้นขวางทางเดิน <b>ลูกศรสีทองคือทิศที่นับเป็นเข้า</b> ต้องเลือกโมเดลตรวจจับให้กล้องนี้ก่อน",
+  zoneHint:"ลากกรอบแล้วปรับจุดให้คลุมพื้นที่ที่ต้องการนับ ต้องเลือกโมเดลตรวจจับให้กล้องนี้ก่อน",
+  pValueStart:"ค่าที่จุด A", pValueEnd:"ค่าที่จุด B",
+  pEdgeDir:"ทิศของรอยต่อ", edgeAuto:"อัตโนมัติ", edgeDL:"มืด→สว่าง", edgeLD:"สว่าง→มืด",
+  pThickness:"ความหนาเส้นสแกน", pSmooth:"Smooth", pMinContrast:"คอนทราสต์ขั้นต่ำ",
+  pMode:"โหมด", modeOuter:"ขอบนอกสุด", modeInner:"คู่ขอบที่ชัดที่สุด",
+  pLabelIn:"ชื่อทิศเข้า", pLabelOut:"ชื่อทิศออก",
+  pReport:"ค่าที่ส่งออก", reportAll:"ทั้งหมด", reportNet:"สุทธิ", reportIn:"เข้า", reportOut:"ออก", reportTotal:"รวม",
+  pAnchor:"จุดอ้างอิงของวัตถุ", anchorCentre:"กึ่งกลางกล่อง", anchorFeet:"ขอบล่าง (เท้า)",
+  scaleTitle:"สเกลของกล้อง", scaleNone:"ยังไม่ตั้ง",
+  scaleHint:"ลากเส้นบนวัตถุที่รู้ขนาดจริง แล้วใส่ความยาวจริง จากนั้นการวัดขนาดจะออกมาเป็นหน่วยจริงแทนพิกเซล",
+  scaleLength:"ความยาวจริง", scaleUnit:"หน่วย",
+  scaleDraw:"ลากเส้นอ้างอิง", scaleClear:"ล้างเส้นอ้างอิง",
+  scaleDrawHint:"ลากเส้นบนภาพทับวัตถุที่รู้ขนาด",
+  scaleDone:"บันทึกเส้นอ้างอิงแล้ว — ใส่ความยาวจริงให้ถูกต้อง",
+  scaleSet:"สเกลตั้งไว้แล้ว:", scaleUnset:"ยังไม่ได้ตั้งสเกล ผลจะออกมาเป็นพิกเซล",
+  detectorTitle:"โมเดลตรวจจับของกล้องนี้",
+  detectorHint:"ใช้ร่วมกันทุกเส้นนับและทุกพื้นที่ รันครั้งเดียวต่อเฟรม",
   task_digits_7seg:"อ่านตัวเลข 7-segment / LCD", task_ocr_text:"OCR ข้อความ",
   task_yolo_detect:"YOLO ตรวจจับวัตถุ", task_yolo_classify:"YOLO จำแนกภาพ",
   task_barcode_qr:"Barcode / QR", task_presence_diff:"ตรวจการเปลี่ยนแปลง / มีของ",
@@ -2051,6 +2939,10 @@ th: {
   hint_barcode_qr:"อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
   hint_presence_diff:"เทียบกับเฟรมอ้างอิง กดสองครั้งเพื่อดูผลการเปลี่ยนแปลง",
   hint_color_check:"นับสัดส่วนพิกเซลที่อยู่ในช่วงสีที่ตั้งไว้",
+  hint_level_line:"หาผิวของเหลวบนเส้น ทำงานในเบราว์เซอร์ ไม่ต้องต่อเน็ต",
+  hint_measure_line:"วัดระยะระหว่างขอบบนเส้น ทำงานในเบราว์เซอร์",
+  hint_line_count:"การนับต้องใช้การติดตามข้ามหลายเฟรม ทดสอบจริงด้วย Python",
+  hint_zone_count:"การนับต้องใช้โมเดลตรวจจับ ทดสอบจริงด้วย Python",
   hintDefault:"กดปุ่ม \u201cทดสอบเลย\u201d ด้านบนเพื่ออ่านค่า",
   testFailed:"ทดสอบไม่สำเร็จ: ",
 
@@ -2134,7 +3026,33 @@ en: {
   roiProps:"ROI properties", fieldName:"Name", fieldEnabled:"Enabled", on:"On", off:"Off",
   fieldTask:"Task", fieldOutputKey:"Output key",
   fieldStable:"Stable frames", fieldEvery:"Process every N frames", fieldAngle:"Angle °",
+  fieldGroup:"Group", groupPh:"e.g. meter_top",
+  groupHint:"ROIs sharing a group name are joined into one reading, ordered left to right automatically — six one-digit ROIs become 225466.",
 
+  task_level_line:"Level along a line (tank/silo)", task_measure_line:"Dimension along a line",
+  task_line_count:"Count across a line (in/out)", task_zone_count:"Count inside a zone",
+  addPoint:"+ point", delPoint:"− point",
+  selectPolygonFirst:"Select a zone shape first", polygonMin:"A zone needs at least 3 points",
+  levelHint:"Draw the line from <b>A = empty</b> to <b>B = full</b>. The surface is found as the clearest brightness step along that line.",
+  measureHint:"Draw the line <b>right across the part</b> with background at both ends. The distance between the first and last edge is measured.",
+  countHint:"Draw the line across the walkway. <b>The gold arrow is the direction counted as in.</b> This camera needs a detector model.",
+  zoneHint:"Drag out a box then move the points to cover the area. This camera needs a detector model.",
+  pValueStart:"Value at A", pValueEnd:"Value at B",
+  pEdgeDir:"Edge direction", edgeAuto:"Automatic", edgeDL:"dark→light", edgeLD:"light→dark",
+  pThickness:"Scan width", pSmooth:"Smooth", pMinContrast:"Minimum contrast",
+  pMode:"Mode", modeOuter:"Outermost edges", modeInner:"Strongest opposing pair",
+  pLabelIn:"Name for in", pLabelOut:"Name for out",
+  pReport:"Value to output", reportAll:"All", reportNet:"Net", reportIn:"In", reportOut:"Out", reportTotal:"Total",
+  pAnchor:"Object anchor", anchorCentre:"Box centre", anchorFeet:"Bottom edge (feet)",
+  scaleTitle:"Camera scale", scaleNone:"not set",
+  scaleHint:"Draw a line across something of known size and type in its real length. Dimensions then come out in real units instead of pixels.",
+  scaleLength:"Real length", scaleUnit:"Unit",
+  scaleDraw:"Draw reference line", scaleClear:"Clear reference",
+  scaleDrawHint:"Drag a line across the object of known size",
+  scaleDone:"Reference line saved — now enter its real length",
+  scaleSet:"Scale set:", scaleUnset:"No scale set, results will be in pixels",
+  detectorTitle:"Detector for this camera",
+  detectorHint:"Shared by every counting line and zone. Runs once per frame.",
   task_digits_7seg:"Read 7-segment / LCD digits", task_ocr_text:"OCR text",
   task_yolo_detect:"YOLO object detection", task_yolo_classify:"YOLO classification",
   task_barcode_qr:"Barcode / QR", task_presence_diff:"Change / presence detection",
@@ -2206,6 +3124,10 @@ en: {
   hint_barcode_qr:"Built-in QR and barcode reading. Works offline, in every browser.",
   hint_presence_diff:"Compares against a reference frame. Press twice to see a change.",
   hint_color_check:"Counts the share of pixels inside the colour range you set",
+  hint_level_line:"Finds the surface along the line. Runs in the browser, offline.",
+  hint_measure_line:"Measures between edges along the line. Runs in the browser.",
+  hint_line_count:"Counting needs tracking across frames — test it for real with Python.",
+  hint_zone_count:"Counting needs a detector model — test it for real with Python.",
   hintDefault:"Press \u201cTest now\u201d above to read a value",
   testFailed:"Test failed: ",
 
@@ -2315,6 +3237,10 @@ window.addEventListener("error", ev => {
 /* ROI colours: TESR gold and red lead the palette, the remaining hues are
    muted so the overlay stays in the brand family and still reads apart. */
 const TASKS = {
+  level_line:   {color:"#5AB4E0", model:false, shape:"line"},
+  measure_line: {color:"#E6CC81", model:false, shape:"line"},
+  line_count:   {color:"#7FD3E0", model:"detector", shape:"line"},
+  zone_count:   {color:"#8CD28C", model:"detector", shape:"polygon"},
   digits_7seg:  {color:"#E6CC81", model:false},
   ocr_text:     {color:"#D9A441", model:false},
   yolo_detect:  {color:"#F30006", model:true},
@@ -2324,11 +3250,24 @@ const TASKS = {
   color_check:  {color:"#C89BD8", model:false},
 };
 const taskLabel = k => t("task_" + k);
+const taskShape = k => (TASKS[k] && TASKS[k].shape) || "rect";
 
 const uid = p => p + "_" + Math.random().toString(36).slice(2, 7);
 
+function defaultPoints(task){
+  const sh = taskShape(task);
+  if(sh === "line")    return [[0.3,0.5],[0.7,0.5]];
+  if(sh === "polygon") return [[0.35,0.35],[0.65,0.35],[0.65,0.65],[0.35,0.65]];
+  return null;
+}
 function defaultParams(task){
   switch(task){
+    case "level_line":   return {edge:"auto", smooth:9, thickness:7, min_contrast:6,
+                                 value_at_start:0, value_at_end:100, unit:"%", decimals:1};
+    case "measure_line": return {mode:"outer", smooth:5, thickness:5, min_contrast:12, decimals:2};
+    case "line_count":   return {label_in:"in", label_out:"out", invert:false,
+                                 report:"all", classes:[]};
+    case "zone_count":   return {anchor:"centroid", classes:[]};
     case "digits_7seg":  return {threshold_mode:"otsu", threshold:128, invert:false, blur:3,
                                  min_fill:0.5, split:"auto", digits:1, decimals:0, unit:"", as_number:true};
     case "ocr_text":     return {engine:"tesseract", lang:"eng", psm:7, whitelist:"", preprocess:true, invert:false};
@@ -2470,10 +3409,104 @@ function draw(){
   const c = cam();
   if(c) c.rois.forEach(roi => drawRoi(roi, roi.id === state.sel));
   if(drag && drag.mode === "create" && drag.box) drawGhost(drag.box);
+  const sc = c && c.scale;
+  const refPts = (drag && drag.mode === "scale" && drag.b) ? [drag.a, drag.b]
+                 : (sc && sc.ref_points ? sc.ref_points : null);
+  if(refPts){
+    const f = frameSize();
+    const a = toScr(refPts[0][0]*f.w, refPts[0][1]*f.h);
+    const b = toScr(refPts[1][0]*f.w, refPts[1][1]*f.h);
+    ctx.save();
+    ctx.strokeStyle = "#FF7A6B"; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#FF7A6B";
+    [a,b].forEach(q => { ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, 7); ctx.fill(); });
+    if(sc && sc.ref_length){
+      ctx.font = "11px ui-monospace, monospace";
+      const label = sc.ref_length + " " + (sc.unit || "mm");
+      ctx.fillStyle = "rgba(11,11,11,.85)";
+      ctx.fillRect((a.x+b.x)/2 + 6, (a.y+b.y)/2 - 16, ctx.measureText(label).width + 8, 15);
+      ctx.fillStyle = "#FF7A6B";
+      ctx.fillText(label, (a.x+b.x)/2 + 10, (a.y+b.y)/2 - 5);
+    }
+    ctx.restore();
+  }
   need = false;
 }
 
+function ptsScr(roi){
+  const f = frameSize();
+  return (roi.points || []).map(p => toScr(p[0]*f.w, p[1]*f.h));
+}
+
+function drawShape(roi, active){
+  const col = TASKS[roi.task] ? TASKS[roi.task].color : "#888";
+  const pts = ptsScr(roi);
+  if(pts.length < 2) return;
+  const res = live.results[roi.id];
+  ctx.save();
+  ctx.globalAlpha = roi.enabled === false ? .5 : 1;
+  ctx.strokeStyle = roi.enabled === false ? "#5A5A5A" : col;
+  ctx.lineWidth = active ? 3 : 2;
+
+  if(roi.shape === "polygon"){
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for(let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.fillStyle = col + "26"; ctx.fill(); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.stroke();
+    // end caps tell you which end is which: A is the empty/start end
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, 5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(pts[1].x, pts[1].y, 5, 0, 7); ctx.fill();
+    ctx.font = "10px ui-monospace, monospace"; ctx.fillStyle = "#F2F2F2";
+    ctx.fillText("A", pts[0].x + 7, pts[0].y - 6);
+    ctx.fillText("B", pts[1].x + 7, pts[1].y - 6);
+
+    if(roi.task === "line_count"){
+      // the arrow is the direction that counts as "in" - what you see is counted
+      const mx = (pts[0].x + pts[1].x)/2, my = (pts[0].y + pts[1].y)/2;
+      let dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+      const n = Math.hypot(dx, dy) || 1;
+      let nx = dy/n, ny = -dx/n;
+      if(roi.params && roi.params.invert){ nx = -nx; ny = -ny; }
+      const L = 30;
+      ctx.strokeStyle = "#E6CC81"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + nx*L, my + ny*L); ctx.stroke();
+      const hx = mx + nx*L, hy = my + ny*L, a = Math.atan2(ny, nx);
+      ctx.beginPath(); ctx.moveTo(hx, hy);
+      ctx.lineTo(hx - 9*Math.cos(a-0.4), hy - 9*Math.sin(a-0.4));
+      ctx.lineTo(hx - 9*Math.cos(a+0.4), hy - 9*Math.sin(a+0.4));
+      ctx.closePath(); ctx.fillStyle = "#E6CC81"; ctx.fill();
+      ctx.fillStyle = "#E6CC81"; ctx.font = "10px ui-monospace, monospace";
+      ctx.fillText((roi.params && roi.params.label_in) || "in", hx + 4, hy + 3);
+    }
+  }
+
+  if(document.getElementById("chkLabels").checked){
+    const top = pts.reduce((m, p) => p.y < m.y ? p : m, pts[0]);
+    const shown = res && res.value !== null && res.value !== undefined && res.value !== ""
+                  ? String(res.value) : null;
+    const txt = shown !== null ? roi.name + "  =  " + shown : roi.name + "  ·  " + roi.task;
+    ctx.font = "11px ui-monospace, monospace";
+    const tw = ctx.measureText(txt).width + 10;
+    ctx.fillStyle = "rgba(11,11,11,.88)";
+    ctx.fillRect(top.x, top.y - 21, tw, 16);
+    ctx.fillStyle = col; ctx.fillRect(top.x, top.y - 21, 3, 16);
+    ctx.fillStyle = "#F2F2F2"; ctx.fillText(txt, top.x + 7, top.y - 9);
+  }
+
+  if(active){
+    ctx.fillStyle = "#F2F2F2"; ctx.strokeStyle = "#101010"; ctx.lineWidth = 1;
+    pts.forEach(pt => { ctx.fillRect(pt.x-4, pt.y-4, 8, 8); ctx.strokeRect(pt.x-4, pt.y-4, 8, 8); });
+  }
+  ctx.restore();
+}
+
 function drawRoi(roi, active){
+  if(roi.shape === "line" || roi.shape === "polygon") return drawShape(roi, active);
   const v = state.view, col = TASKS[roi.task] ? TASKS[roi.task].color : "#888";
   const res = live.results[roi.id];
   const pts = corners(roi).map(p => toScr(p.x, p.y));
@@ -2570,18 +3603,54 @@ function startRenderLoop(){
 
 /* ------------------------------ mouse ------------------------------ */
 
+function nearSegment(px, py, a, b){
+  const vx = b[0]-a[0], vy = b[1]-a[1];
+  const L2 = vx*vx + vy*vy || 1;
+  let t = ((px-a[0])*vx + (py-a[1])*vy) / L2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (a[0]+vx*t), py - (a[1]+vy*t));
+}
+function insidePolygon(px, py, poly){
+  let inside = false;
+  for(let i = 0, j = poly.length-1; i < poly.length; j = i++){
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if(((yi > py) !== (yj > py)) &&
+       (px < (xj-xi)*(py-yi)/((yj-yi) || 1e-9) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
 function hitTest(ix, iy){
   const c = cam(); if(!c) return null;
+  const f = frameSize(), tol = 9 / state.view.scale;
   const sel = selRoi();
-  if(sel){
-    const tol = 9 / state.view.scale;
+
+  if(sel && sel.points){                       // vertex handles of the selected shape
+    for(let i = 0; i < sel.points.length; i++){
+      const px = sel.points[i][0]*f.w, py = sel.points[i][1]*f.h;
+      if(Math.abs(px - ix) < tol && Math.abs(py - iy) < tol)
+        return {roi:sel, handle:"pt" + i};
+    }
+  }
+  if(sel && !sel.points){
     for(const h of handlePoints(sel)){
       if(Math.abs(h.x - ix) < tol && Math.abs(h.y - iy) < tol) return {roi:sel, handle:h.id};
     }
   }
+
   for(let i = c.rois.length - 1; i >= 0; i--){
-    const l = toLocal(c.rois[i], ix, iy);
-    if(Math.abs(l.x) <= l.p.w/2 && Math.abs(l.y) <= l.p.h/2) return {roi:c.rois[i], handle:"move"};
+    const r = c.rois[i];
+    if(r.points && r.points.length >= 2){
+      const px = r.points.map(p => [p[0]*f.w, p[1]*f.h]);
+      if(r.shape === "polygon" && insidePolygon(ix, iy, px)) return {roi:r, handle:"move"};
+      for(let k = 0; k + 1 < px.length; k++)
+        if(nearSegment(ix, iy, px[k], px[k+1]) < tol) return {roi:r, handle:"move"};
+      if(r.shape === "polygon" && nearSegment(ix, iy, px[px.length-1], px[0]) < tol)
+        return {roi:r, handle:"move"};
+      continue;
+    }
+    const l = toLocal(r, ix, iy);
+    if(Math.abs(l.x) <= l.p.w/2 && Math.abs(l.y) <= l.p.h/2) return {roi:r, handle:"move"};
   }
   return null;
 }
@@ -2591,12 +3660,23 @@ cv.addEventListener("pointerdown", e => {
   cv.setPointerCapture(e.pointerId);
   const r = cv.getBoundingClientRect(), p = toImg(e.clientX - r.left, e.clientY - r.top);
   if(e.button === 1 || e.shiftKey){ drag = {mode:"pan", sx:e.clientX, sy:e.clientY, tx:state.view.tx, ty:state.view.ty}; return; }
+  if(scaleDrawing){
+    const f = frameSize();
+    drag = {mode:"scale", a:[p.x/f.w, p.y/f.h]};
+    return;
+  }
   const hit = hitTest(p.x, p.y);
   if(hit){
     select(hit.roi.id);
     const g = rectPx(hit.roi);
-    drag = {mode: hit.handle === "move" ? "move" : (hit.handle === "rot" ? "rotate" : "resize"),
-            handle: hit.handle, roi: hit.roi, start: p, g};
+    if(hit.roi.points){
+      drag = {mode: hit.handle.startsWith("pt") ? "vertex" : "shapeMove",
+              handle: hit.handle, roi: hit.roi, start: p,
+              orig: hit.roi.points.map(q => q.slice())};
+    } else {
+      drag = {mode: hit.handle === "move" ? "move" : (hit.handle === "rot" ? "rotate" : "resize"),
+              handle: hit.handle, roi: hit.roi, start: p, g};
+    }
   } else {
     select(null);
     drag = {mode:"create", box:{x0:p.x, y0:p.y, x1:p.x, y1:p.y}};
@@ -2611,11 +3691,26 @@ cv.addEventListener("pointermove", e => {
     Math.round(p.x) + "," + Math.round(p.y) + " px  (" + (p.x/f.w*100).toFixed(1) + "%, " + (p.y/f.h*100).toFixed(1) + "%)";
   if(!drag) return;
 
+  if(drag.mode === "scale"){
+    const f = frameSize();
+    drag.b = [p.x/f.w, p.y/f.h];
+    invalidate();
+    return;
+  }
   if(drag.mode === "pan"){
     state.view.tx = drag.tx + (e.clientX - drag.sx);
     state.view.ty = drag.ty + (e.clientY - drag.sy);
   } else if(drag.mode === "create"){
     drag.box.x1 = p.x; drag.box.y1 = p.y;
+  } else if(drag.mode === "vertex"){
+    const f = frameSize(), i = +drag.handle.slice(2);
+    drag.roi.points[i] = [ +Math.min(1, Math.max(0, p.x / f.w)).toFixed(4),
+                           +Math.min(1, Math.max(0, p.y / f.h)).toFixed(4) ];
+  } else if(drag.mode === "shapeMove"){
+    const f = frameSize();
+    const dx = (p.x - drag.start.x) / f.w, dy = (p.y - drag.start.y) / f.h;
+    drag.roi.points = drag.orig.map(q => [ +Math.min(1, Math.max(0, q[0] + dx)).toFixed(4),
+                                           +Math.min(1, Math.max(0, q[1] + dy)).toFixed(4) ]);
   } else if(drag.mode === "move"){
     const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
     setRectPx(drag.roi, drag.g.cx + dx, drag.g.cy + dy, drag.g.w, drag.g.h);
@@ -2640,6 +3735,18 @@ cv.addEventListener("pointermove", e => {
 });
 
 function endDrag(){
+  if(drag && drag.mode === "scale"){
+    if(drag.b){
+      const sc = ensureScale();
+      sc.ref_points = [drag.a.map(v => +v.toFixed(5)), drag.b.map(v => +v.toFixed(5))];
+      if(!sc.ref_length) sc.ref_length = 100;
+      if(!sc.unit) sc.unit = "mm";
+      syncScaleUi(); syncProps();
+      toast(t("scaleDone"));
+    }
+    scaleDrawing = false; drag = null; invalidate();
+    return;
+  }
   if(drag && drag.mode === "create" && drag.box){
     const b = drag.box, f = frameSize();
     const w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0);
@@ -2672,6 +3779,12 @@ document.addEventListener("keydown", e => {
   const map = {ArrowLeft:[-step,0], ArrowRight:[step,0], ArrowUp:[0,-step], ArrowDown:[0,step]};
   if(map[e.key]){
     e.preventDefault();
+    if(roi.points){
+      roi.points = roi.points.map(q => [ +Math.min(1, Math.max(0, q[0] + map[e.key][0]/f.w)).toFixed(4),
+                                         +Math.min(1, Math.max(0, q[1] + map[e.key][1]/f.h)).toFixed(4) ]);
+      syncProps(); updatePreview(); invalidate();
+      return;
+    }
     roi.rect.x += map[e.key][0] / f.w;
     roi.rect.y += map[e.key][1] / f.h;
     syncProps(); updatePreview(); invalidate();
@@ -2683,11 +3796,21 @@ function addRoi(x, y, w, h){
   const c = cam(), task = document.getElementById("newTask").value;
   const n = c.rois.length + 1;
   const roi = {id: uid("roi"), name: task.split("_")[0] + "_" + n, enabled: true, task,
+               shape: taskShape(task),
                rect:{x:+x.toFixed(4), y:+y.toFixed(4), w:+w.toFixed(4), h:+h.toFixed(4), angle:0},
                output_key: task.split("_")[0] + "_" + n, stable_frames: 2, every_n_frames: 1,
                upscale_to: task === "digits_7seg" ? 160 : 0,
                params: defaultParams(task)};
   const m = defaultModel(task); if(m) roi.model = m;
+  if(roi.shape !== "rect"){
+    // a line or a polygon is placed inside the box that was just dragged out
+    const dp = defaultPoints(task);
+    roi.points = roi.shape === "line"
+      ? [[x, y + h/2], [x + w, y + h/2]]
+      : [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    roi.points = roi.points.map(pt => [ +Math.min(1, Math.max(0, pt[0])).toFixed(4),
+                                        +Math.min(1, Math.max(0, pt[1])).toFixed(4) ]);
+  }
   c.rois.push(roi);
   select(roi.id); renderRoiList(); invalidate();
 }
@@ -2732,6 +3855,7 @@ function renderCamList(){
   const c = cam(); if(!c) return;
   camName.value = c.name; camId.value = c.id; camSource.value = c.source;
   camW.value = c.width; camH.value = c.height; camRot.value = String(c.rotate || 0);
+  syncScaleUi(); syncDetectorUi();
 }
 function renderRoiList(){
   const box = document.getElementById("roiList"); box.innerHTML = "";
@@ -2769,6 +3893,7 @@ function syncProps(){
   if(!r) return;
   P("roiIdTag").textContent = r.id;
   P("pName").value = r.name; P("pKey").value = r.output_key || r.name;
+  P("pGroup").value = r.group || "";
   P("pTask").value = r.task; P("pEnabled").value = r.enabled === false ? "0" : "1";
   P("pStable").value = r.stable_frames || 1; P("pEvery").value = r.every_n_frames || 1;
   P("pX").value = (r.rect.x*100).toFixed(1); P("pY").value = (r.rect.y*100).toFixed(1);
@@ -2806,10 +3931,66 @@ function sel(obj, key, options){
 function rowOf(nodes){ const d = document.createElement("div"); d.className = "row";
   nodes.forEach(n => d.appendChild(n)); return d; }
 
+function classFilterField(r){
+  const i = document.createElement("input");
+  i.value = (r.params.classes || []).join(",");
+  i.placeholder = t("filterPh");
+  i.oninput = () => r.params.classes = i.value.split(",").map(x => x.trim()).filter(Boolean);
+  return field(t("pFilterClasses"), i);
+}
+function camScaleText(){
+  const c = cam();
+  const sc = c && c.scale;
+  if(sc && sc.ref_length > 0)
+    return t("scaleSet") + " " + sc.ref_length + " " + (sc.unit || "mm");
+  return t("scaleUnset");
+}
+
 function renderTaskParams(r){
   const box = P("taskParams"); box.innerHTML = "";
   const p = r.params, add = n => box.appendChild(n);
-  if(r.task === "digits_7seg"){
+  if(r.task === "level_line"){
+    const h1 = document.createElement("div"); h1.className = "hint";
+    h1.innerHTML = t("levelHint");
+    add(h1);
+    add(rowOf([field(t("pValueStart"), num(p,"value_at_start",{step:1})),
+               field(t("pValueEnd"), num(p,"value_at_end",{step:1})),
+               field(t("pUnit"), txt(p,"unit"))]));
+    add(rowOf([field(t("pEdgeDir"), sel(p,"edge",[["auto",t("edgeAuto")],
+                 ["dark_to_light",t("edgeDL")],["light_to_dark",t("edgeLD")]])),
+               field(t("pDecimals"), num(p,"decimals",{min:0,max:3,step:1}))]));
+    add(rowOf([field(t("pThickness"), num(p,"thickness",{min:1,max:31,step:2})),
+               field(t("pSmooth"), num(p,"smooth",{min:1,max:31,step:2})),
+               field(t("pMinContrast"), num(p,"min_contrast",{min:1,max:120,step:1}))]));
+  } else if(r.task === "measure_line"){
+    const h1 = document.createElement("div"); h1.className = "hint";
+    h1.innerHTML = t("measureHint");
+    add(h1);
+    add(rowOf([field(t("pMode"), sel(p,"mode",[["outer",t("modeOuter")],["inner",t("modeInner")]])),
+               field(t("pDecimals"), num(p,"decimals",{min:0,max:4,step:1}))]));
+    add(rowOf([field(t("pThickness"), num(p,"thickness",{min:1,max:31,step:2})),
+               field(t("pSmooth"), num(p,"smooth",{min:1,max:31,step:2})),
+               field(t("pMinContrast"), num(p,"min_contrast",{min:1,max:120,step:1}))]));
+    const cal = document.createElement("div"); cal.className = "hint";
+    cal.innerHTML = camScaleText();
+    add(cal);
+  } else if(r.task === "line_count"){
+    const h1 = document.createElement("div"); h1.className = "hint";
+    h1.innerHTML = t("countHint");
+    add(h1);
+    add(rowOf([field(t("pLabelIn"), txt(p,"label_in")),
+               field(t("pLabelOut"), txt(p,"label_out"))]));
+    add(rowOf([field(t("pInvert"), sel(p,"invert",[[false,t("no")],[true,t("yes")]])),
+               field(t("pReport"), sel(p,"report",[["all",t("reportAll")],["net",t("reportNet")],
+                     ["in",t("reportIn")],["out",t("reportOut")],["total",t("reportTotal")]]))]));
+    add(classFilterField(r));
+  } else if(r.task === "zone_count"){
+    const h1 = document.createElement("div"); h1.className = "hint";
+    h1.innerHTML = t("zoneHint");
+    add(h1);
+    add(field(t("pAnchor"), sel(p,"anchor",[["centroid",t("anchorCentre")],["bottom",t("anchorFeet")]])));
+    add(classFilterField(r));
+  } else if(r.task === "digits_7seg"){
     add(rowOf([field(t("pDigits"), num(p,"digits",{min:0,step:1})),
                field(t("pDecimals"), num(p,"decimals",{min:0,step:1}))]));
     const dh = document.createElement("div");
@@ -2888,6 +4069,11 @@ function renderTaskParams(r){
 }
 
 /* bind simple property inputs */
+P("pGroup").oninput = () => {
+  const r = selRoi(); if(!r) return;
+  const v = P("pGroup").value.trim();
+  if(v) r.group = v; else delete r.group;
+};
 [["pName","name"],["pKey","output_key"]].forEach(([id, key]) => {
   P(id).oninput = () => { const r = selRoi(); if(!r) return; r[key] = P(id).value; renderRoiList(); invalidate(); };
 });
@@ -2898,6 +4084,17 @@ P("pEnabled").onchange = () => { const r = selRoi(); if(r){ r.enabled = P("pEnab
 P("pTask").onchange = () => {
   const r = selRoi(); if(!r) return;
   r.task = P("pTask").value; r.params = defaultParams(r.task);
+  const want = taskShape(r.task);
+  if(want !== (r.shape || "rect")){
+    r.shape = want;
+    if(want === "rect"){ delete r.points; }
+    else {
+      const b = r.rect || {x:0.3,y:0.4,w:0.4,h:0.2};
+      r.points = want === "line"
+        ? [[b.x, b.y + b.h/2], [b.x + b.w, b.y + b.h/2]]
+        : [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]];
+    }
+  }
   const m = defaultModel(r.task); if(m) r.model = m; else delete r.model;
   if(r.task === "digits_7seg" && !r.upscale_to) r.upscale_to = 160;
   syncProps(); renderRoiList(); updatePreview(); invalidate();
@@ -2919,6 +4116,51 @@ P("camId").oninput = () => { const c = cam(); if(!c) return;
   P(id).oninput = () => { const c = cam(); if(c){ c[key] = +P(id).value || 0; if(!c.bg){ renderAll(); fit(); } } };
 });
 P("camRot").onchange = () => { const c = cam(); if(c) c.rotate = +P("camRot").value; };
+
+/* ---- scale: a line of known real length turns pixels into millimetres ---- */
+function syncScaleUi(){
+  const c = cam(); if(!c) return;
+  const sc = c.scale || {};
+  P("scLen").value = sc.ref_length || "";
+  P("scUnit").value = sc.unit || "mm";
+  const ok = sc.ref_points && sc.ref_length > 0;
+  P("scaleTag").textContent = ok ? (sc.ref_length + " " + (sc.unit || "mm")) : t("scaleNone");
+  P("scaleTag").style.color = ok ? "var(--tesr-gold)" : "var(--dim)";
+}
+function ensureScale(){ const c = cam(); if(!c.scale) c.scale = {unit:"mm"}; return c.scale; }
+P("scLen").oninput = () => { ensureScale().ref_length = +P("scLen").value || 0; syncScaleUi(); syncProps(); };
+P("scUnit").oninput = () => { ensureScale().unit = P("scUnit").value.trim() || "mm"; syncScaleUi(); syncProps(); };
+P("btnScaleDraw").onclick = () => {
+  if(!sourceEl()) return toast(t("needImage"));
+  scaleDrawing = true;
+  toast(t("scaleDrawHint"));
+};
+P("btnScaleClear").onclick = () => {
+  const c = cam(); if(c && c.scale) delete c.scale.ref_points;
+  syncScaleUi(); syncProps(); invalidate();
+};
+let scaleDrawing = false;
+
+/* ---- the camera detector feeds every counting line and zone ---- */
+function syncDetectorUi(){
+  const c = cam(); if(!c) return;
+  const sel = P("camDetector");
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = models.length ? t("pickModel") : t("noModelYet");
+  sel.appendChild(none);
+  models.filter(m => m.type === "detect").forEach(m => {
+    const o = document.createElement("option"); o.value = m.id; o.textContent = m.name;
+    sel.appendChild(o);
+  });
+  sel.value = (c.detector && c.detector.id) || "";
+}
+P("camDetector").onchange = () => {
+  const c = cam(); if(!c) return;
+  const m = models.find(x => x.id === P("camDetector").value);
+  if(m) c.detector = {id:m.id, path:m.deploy, imgsz:m.size, conf:m.conf, iou:m.iou, class_names:m.names};
+  else delete c.detector;
+};
 
 /* ------------------------------ background image ------------------------------ */
 function setBackground(dataUrl){
@@ -4353,6 +5595,10 @@ function buildConfig(includeRef){
     runtime: state.runtime,
     cameras: state.cameras.map(c => ({
       id: c.id, name: c.name, source: c.source, width: c.width, height: c.height, rotate: c.rotate || 0,
+      scale: (c.scale && c.scale.ref_points && c.scale.ref_length > 0)
+             ? {ref_points: c.scale.ref_points, ref_length: c.scale.ref_length, unit: c.scale.unit || "mm"}
+             : undefined,
+      detector: c.detector ? (() => { const d = Object.assign({}, c.detector); delete d.id; return d; })() : undefined,
       reference_image: includeRef ? c.bg : null,
       rois: c.rois.map(r => {
         const o = {id:r.id, name:r.name, enabled:r.enabled !== false, task:r.task,
@@ -4361,6 +5607,11 @@ function buildConfig(includeRef){
                    rect:{x:+r.rect.x.toFixed(5), y:+r.rect.y.toFixed(5),
                          w:+r.rect.w.toFixed(5), h:+r.rect.h.toFixed(5), angle:+(r.rect.angle||0)},
                    params:r.params};
+        if(r.group) o.group = r.group;
+        if(r.shape && r.shape !== "rect"){
+          o.shape = r.shape;
+          o.points = (r.points || []).map(q => [+(+q[0]).toFixed(5), +(+q[1]).toFixed(5)]);
+        }
         if(r.model){
           const m = models.find(x => x.id === r.model.id);
           o.model = Object.assign({}, r.model);
@@ -4396,12 +5647,23 @@ P("btnPy").onclick = () => {
   download(name + "_config.json", JSON.stringify(buildConfig(true), null, 2), "application/json");
   const py = document.getElementById("runnerSrc").textContent;
   setTimeout(() => download("tesr_vision_runner.py", py, "text/x-python"), 350);
+  // a config with lines or zones cannot run without the engine, so send it too
+  const needsLine = state.cameras.some(c => (c.rois || []).some(
+    r => ["level_line","measure_line","line_count","zone_count"].indexOf(r.task) >= 0));
+  if(needsLine){
+    const eng = document.getElementById("lineSrc").textContent;
+    setTimeout(() => download("tesr_line_engine.py", eng, "text/x-python"), 550);
+  }
   setTimeout(() => {
     P("dlgTitle").textContent = t("qsTitle");
     P("dlgBody").textContent = quickstart(name);
     P("dlg").showModal();
   }, 700);
 };
+function needsLineEngine(){
+  return state.cameras.some(c => (c.rois || []).some(
+    r => ["level_line","measure_line","line_count","zone_count"].indexOf(r.task) >= 0));
+}
 function quickstart(name){
   const cams = state.cameras.map(c => "  " + c.id + "  (" + c.rois.length + " ROI)  source=" + c.source).join("\n");
   const cfg = name + "_config.json";
@@ -4409,6 +5671,7 @@ function quickstart(name){
 "ไฟล์ที่ดาวน์โหลด",
 "  " + cfg + "     กรอบ ROI ทั้งหมด + ค่าพารามิเตอร์",
 "  tesr_vision_runner.py        โปรแกรมอ่านค่า ใช้ได้ทั้ง Windows / macOS / Linux / Raspberry Pi / Jetson",
+(needsLineEngine() ? "  tesr_line_engine.py          เอนจินเส้นและพื้นที่ ต้องวางไว้โฟลเดอร์เดียวกัน" : ""),
 "",
 "กล้องในไฟล์นี้",
 cams,
@@ -4458,6 +5721,7 @@ cams,
 "Files you just downloaded",
 "  " + cfg + "     every ROI plus its parameters",
 "  tesr_vision_runner.py        the reader; runs on Windows / macOS / Linux / Raspberry Pi / Jetson",
+(needsLineEngine() ? "  tesr_line_engine.py          the line and zone engine; keep it in the same folder" : ""),
 "",
 "Cameras in this config",
 cams,
@@ -4503,7 +5767,7 @@ cams,
 "   Set stable_frames >= 2 so the value does not flicker while the display is changing.",
 "   Real accuracy can only be measured on site."
   ];
-  return (LANG === "en" ? EN : TH).join("\n");
+  return (LANG === "en" ? EN : TH).filter(Boolean).join("\n");
 }
 
 /* import */
@@ -4526,9 +5790,9 @@ function loadConfig(cfg){
   state.cameras = (cfg.cameras || []).map(c => ({
     id:c.id, name:c.name || c.id, source:String(c.source != null ? c.source : "0"),
     width:c.width || 1280, height:c.height || 720, rotate:c.rotate || 0,
-    bg:c.reference_image || null,
+    bg:c.reference_image || null, scale:c.scale || null, detector:c.detector || null,
     rois:(c.rois || []).map(r => Object.assign({enabled:true, stable_frames:1, every_n_frames:1,
-      upscale_to:0, params:{}}, r))
+      upscale_to:0, params:{}, shape:(r.points ? (r.points.length > 2 ? "polygon" : "line") : "rect")}, r))
   }));
   if(!state.cameras.length) state.cameras = [newCamera(1)];
   state.ci = 0; state.sel = null;
@@ -4565,6 +5829,27 @@ P("btnAddCam").onclick = () => { state.cameras.push(newCamera(state.cameras.leng
 P("btnFit").onclick = fit;
 P("btnZoomIn").onclick = () => { state.view.scale *= 1.25; invalidate(); };
 P("btnZoomOut").onclick = () => { state.view.scale /= 1.25; invalidate(); };
+P("btnAddPt").onclick = () => {
+  const r = selRoi();
+  if(!r || r.shape !== "polygon") return toast(t("selectPolygonFirst"));
+  // split the longest edge, which is where a vertex is usually wanted
+  let best = 0, bestLen = -1;
+  for(let i = 0; i < r.points.length; i++){
+    const a = r.points[i], b = r.points[(i+1) % r.points.length];
+    const L = Math.hypot(b[0]-a[0], b[1]-a[1]);
+    if(L > bestLen){ bestLen = L; best = i; }
+  }
+  const a = r.points[best], b = r.points[(best+1) % r.points.length];
+  r.points.splice(best+1, 0, [ +((a[0]+b[0])/2).toFixed(4), +((a[1]+b[1])/2).toFixed(4) ]);
+  syncProps(); invalidate();
+};
+P("btnDelPt").onclick = () => {
+  const r = selRoi();
+  if(!r || r.shape !== "polygon") return toast(t("selectPolygonFirst"));
+  if(r.points.length <= 3) return toast(t("polygonMin"));
+  r.points.pop();
+  syncProps(); invalidate();
+};
 P("btnDup").onclick = dupRoi;
 P("btnDel").onclick = () => { const r = selRoi(); if(r) delRoi(r.id); };
 
@@ -4590,7 +5875,7 @@ function initTaskSelectors(){
 /* everything drawn or built by script has to be regenerated on a language switch */
 function rebuildDynamicText(){
   initTaskSelectors();
-  renderCamList(); renderRoiList(); renderModels();
+  renderCamList(); renderRoiList(); renderModels(); syncScaleUi(); syncDetectorUi();
   syncProps(); syncRuntimeUi();
   P("diagList").innerHTML = ""; P("diagBand").textContent = "";
   lastSizeText = "";
