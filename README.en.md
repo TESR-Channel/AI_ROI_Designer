@@ -379,6 +379,38 @@ If a red mark lands in the wrong place you can see it immediately rather than gu
 
 ---
 
+### Measuring between marks, for example 6 cm to 7 cm
+
+**Outermost edges** is built for a solid part: it finds the first and last edge and measures between them.
+Point it at two ruler ticks and it refuses, because the gap between the ticks looks exactly like the background.
+
+Switch the mode to **Between marks (centre to centre)**. That finds the *centre* of every mark the line
+crosses and measures from the first centre to the last, which is what a person reading a ruler means
+by "from 6 to 7".
+
+**Steps**
+
+1. Set the scale first, and drag the reference line **as long as you can** — 3 cm or more — then type its real length.
+   (Calibrating on exactly 6→7 and then measuring 6→7 always returns 10 mm. That is measuring itself, not a test.)
+2. Draw the measurement line **through both marks**, at a height where the marks actually reach.
+3. Set the mode to **Between marks**.
+4. Read the graph: the faint gold lines are every mark found, the two red lines are the outer pair being measured.
+
+**Measured accuracy** on a synthetic ruler at 41 px/mm, calibrated over 20 mm, then measuring other spans
+as independent checks:
+
+| Span | Reported | Error |
+|---|---|---|
+| 1 mm | 0.99 | 0.01 mm |
+| 5 mm | 4.98 | 0.02 mm |
+| 10 mm | 10.00 | 0.00 mm |
+| 30 mm | 30.00 | 0.00 mm |
+
+Those come from synthetic images where everything is controlled. A real camera with a real lens at a real
+angle will do worse; measure a known standard on site to find out by how much.
+
+---
+
 ### Counting across a line
 
 Draw the line across the walkway. **The gold arrow on the line is the direction counted as "in"** —

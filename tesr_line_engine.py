@@ -287,23 +287,102 @@ def task_level(frame, roi, ctx):
 # task: dimension between two edges along a line
 # --------------------------------------------------------------------------
 
-def task_measure(frame, roi, ctx):
-    """Distance between the first and last strong edge along the line.
+def _marks_along(prof, min_contrast, dark=None):
+    """Find printed marks along the profile and return their centres.
 
-    Draw the line so it crosses the part completely, with background at both
-    ends. Returns pixels, plus real units when the camera has a scale reference.
+    Measuring between two ruler ticks or two printed lines is a different job
+    from measuring a solid part: what matters is the CENTRE of each mark, not
+    its edges, and the space between the marks looks exactly like the space
+    outside them. So this ignores the edge-pair logic entirely.
+
+    The threshold is taken relative to the background rather than from a
+    percentile, because a line may cross only two thin marks - in that case the
+    marks are a tiny fraction of the samples and every percentile still lands on
+    background.
+    """
+    bg = float(np.median(prof))
+    below = bg - float(prof.min())
+    above = float(prof.max()) - bg
+    if dark is None:
+        dark = below >= above
+    depth = below if dark else above
+    if depth < min_contrast:
+        return [], dark
+    thr = bg - depth * 0.5 if dark else bg + depth * 0.5
+    sel = prof < thr if dark else prof > thr
+
+    # Random texture also produces "marks". A printed mark stands clear of a
+    # quiet background: measured on real scales the depth is 9x the background
+    # spread or better, while noise sits around 4x, so 6x separates them with
+    # room on both sides.
+    quiet = prof[~sel]
+    if quiet.size > 3:
+        spread = float(quiet.std())
+        if depth < spread * float(6.0):
+            return [], dark
+
+    runs, i, n = [], 0, len(sel)
+    while i < n:
+        if not sel[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and sel[j]:
+            j += 1
+        seg = np.abs(prof[i:j] - thr)
+        weight = float(seg.sum())
+        centre = float((np.arange(i, j) * seg).sum() / weight) if weight > 0 else (i + j - 1) / 2.0
+        runs.append({"centre": centre, "width": j - i, "depth": float(seg.max())})
+        i = j
+    return runs, dark
+
+
+def task_measure(frame, roi, ctx):
+    """Distance along a line.
+
+    mode "outer" / "inner" measure a solid object: the line must cross the part
+    with background at both ends.
+
+    mode "marks" measures between printed marks - ruler ticks, scale lines,
+    scribed marks - centre to centre, which is what a person reading a ruler
+    means by "from 6 to 7".
     """
     p = roi.get("params") or {}
     h, w = frame.shape[:2]
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
     prof, t = sample_profile(gray, roi["points"], w, h, p.get("thickness", 5))
     prof = smooth1d(prof, int(p.get("smooth", 5)))
+    if prof.size < 4:
+        return None, 0.0, {"reason": "line too short"}
+
+    total_px = line_length(roi["points"], w, h)
+    n = max(1, len(prof) - 1)
+    thr = float(p.get("min_contrast", 12))
+    factor, unit = px_per_unit(ctx.get("scale"), w, h)
+    dec = int(p.get("decimals", 2))
+
+    if p.get("mode") == "marks":
+        polarity = p.get("mark_polarity", "auto")
+        dark = None if polarity == "auto" else (polarity == "dark")
+        marks, used_dark = _marks_along(prof, thr, dark)
+        marks = [m for m in marks if m["width"] >= int(p.get("min_mark_width", 1))]
+        if len(marks) < 2:
+            return None, 0.0, {"reason": "fewer than two marks", "marks": len(marks)}
+        span_px = abs(marks[-1]["centre"] - marks[0]["centre"]) / n * total_px
+        if factor:
+            value = round(span_px / factor, dec)
+        else:
+            value, unit = round(span_px, 1), "px"
+        conf = float(np.clip(min(marks[0]["depth"], marks[-1]["depth"]) / 40.0, 0.0, 1.0))
+        return value, conf, {"px": span_px, "unit": unit, "marks": len(marks),
+                             "dark": used_dark,
+                             "centres": [m["centre"] for m in marks]}
+
     grad = np.diff(prof)
     if grad.size < 3:
         return None, 0.0, {}
 
     mag = np.abs(grad)
-    thr = float(p.get("min_contrast", 12))
     edges = _edges(mag, thr)
     if len(edges) < 2:
         return None, 0.0, {"reason": "fewer than two edges", "max_grad": float(mag.max())}
@@ -332,17 +411,14 @@ def task_measure(frame, roi, ctx):
     outside = np.concatenate([prof[:a], prof[b:]])
     if inside.size and outside.size:
         step = abs(float(inside.mean()) - float(outside.mean()))
-        if step < float(p.get("min_contrast", 12)) * 0.5:
+        if step < thr * 0.5:
             return None, 0.0, {"reason": "nothing solid between the edges",
                                "step": round(step, 1)}
 
-    total_px = line_length(roi["points"], w, h)
-    n = max(1, len(prof) - 1)
     span_px = abs(e1[0] - e0[0]) / n * total_px
 
-    factor, unit = px_per_unit(ctx.get("scale"), w, h)
     if factor:
-        value = round(span_px / factor, int(p.get("decimals", 2)))
+        value = round(span_px / factor, dec)
     else:
         value, unit = round(span_px, 1), "px"
 
