@@ -2841,6 +2841,15 @@ th: {
   groupHint:"กรอบที่ใส่ชื่อกลุ่มเดียวกันจะถูกต่อเป็นตัวเลขชุดเดียวตอนอ่าน เรียงจากซ้ายไปขวาให้อัตโนมัติ เช่น 6 กรอบหลักละกรอบ รวมเป็น 225466",
 
   /* tasks */
+  lr_noSurface:"ไม่พบรอยต่อที่ชัดพอบนเส้น — ลากเส้นให้ผ่านผิวของเหลวจริง ๆ หรือลด \"คอนทราสต์ขั้นต่ำ\"",
+  lr_sidesSame:"สองฝั่งของเส้นสว่างพอ ๆ กัน — ของเหลวกับอากาศต้องต่างกันพอที่กล้องจะเห็น",
+  lr_tooTextured:"เส้นนี้มีลวดลายรบกวนมากเกินไป — ขยับเส้นไปที่ผิวเรียบ หรือเพิ่ม Smooth",
+  lr_surfaceAtEnd:"เจอรอยต่อที่ปลายเส้นพอดี — ลากเส้นให้ยาวเลยขอบเขตของระดับทั้งสองด้าน",
+  lr_fewEdges:"เจอขอบไม่ถึงสองขอบ — ลากเส้นให้ตัดผ่านชิ้นงานจนสุด และให้ปลายทั้งสองอยู่บนพื้นหลัง หรือลด \"คอนทราสต์ขั้นต่ำ\"",
+  lr_weakEdges:"ขอบไม่เด่นพอเมื่อเทียบกับลวดลายรอบ ๆ — เพิ่มคอนทราสต์ของภาพ หรือเลือกตำแหน่งที่พื้นหลังเรียบกว่า",
+  lr_nothingBetween:"ระหว่างสองขอบไม่มีอะไรที่ต่างจากพื้นหลัง — น่าจะกำลังวัดขอบสองอันที่ไม่ใช่ชิ้นงานเดียวกัน",
+  lr_lineShort:"เส้นสั้นเกินไป — ลากให้ยาวขึ้น",
+  noScaleYet:"ยังไม่ได้ตั้งสเกล จึงเป็นพิกเซล",
   task_level_line:"วัดระดับตามเส้น (ถัง/ไซโล)", task_measure_line:"วัดขนาดตามเส้น",
   task_line_count:"นับข้ามเส้น (เข้า/ออก)", task_zone_count:"นับในพื้นที่",
   addPoint:"+ จุด", delPoint:"− จุด",
@@ -2939,8 +2948,8 @@ th: {
   hint_barcode_qr:"อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
   hint_presence_diff:"เทียบกับเฟรมอ้างอิง กดสองครั้งเพื่อดูผลการเปลี่ยนแปลง",
   hint_color_check:"นับสัดส่วนพิกเซลที่อยู่ในช่วงสีที่ตั้งไว้",
-  hint_level_line:"หาผิวของเหลวบนเส้น ทำงานในเบราว์เซอร์ ไม่ต้องต่อเน็ต",
-  hint_measure_line:"วัดระยะระหว่างขอบบนเส้น ทำงานในเบราว์เซอร์",
+  hint_level_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า ดูแถบภาพและกราฟด้านล่างประกอบ",
+  hint_measure_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือขอบที่ระบบเจอ",
   hint_line_count:"การนับต้องใช้การติดตามข้ามหลายเฟรม ทดสอบจริงด้วย Python",
   hint_zone_count:"การนับต้องใช้โมเดลตรวจจับ ทดสอบจริงด้วย Python",
   hintDefault:"กดปุ่ม \u201cทดสอบเลย\u201d ด้านบนเพื่ออ่านค่า",
@@ -3029,6 +3038,15 @@ en: {
   fieldGroup:"Group", groupPh:"e.g. meter_top",
   groupHint:"ROIs sharing a group name are joined into one reading, ordered left to right automatically — six one-digit ROIs become 225466.",
 
+  lr_noSurface:"No clear step along the line — make sure it crosses the actual surface, or lower \"Minimum contrast\"",
+  lr_sidesSame:"Both sides of the line look equally bright — the liquid and the air have to differ enough for the camera to see",
+  lr_tooTextured:"This line runs across too much texture — move it onto a plainer stretch, or raise Smooth",
+  lr_surfaceAtEnd:"The step sits right at the end of the line — extend the line past the empty and full marks",
+  lr_fewEdges:"Fewer than two edges found — draw the line right across the part with background at both ends, or lower \"Minimum contrast\"",
+  lr_weakEdges:"The edges do not stand out from the surrounding texture — improve contrast, or pick a spot with a plainer background",
+  lr_nothingBetween:"Nothing between the two edges differs from the background — this is probably measuring two unrelated features",
+  lr_lineShort:"The line is too short — drag it longer",
+  noScaleYet:"no scale set, so this is pixels",
   task_level_line:"Level along a line (tank/silo)", task_measure_line:"Dimension along a line",
   task_line_count:"Count across a line (in/out)", task_zone_count:"Count inside a zone",
   addPoint:"+ point", delPoint:"− point",
@@ -3124,8 +3142,8 @@ en: {
   hint_barcode_qr:"Built-in QR and barcode reading. Works offline, in every browser.",
   hint_presence_diff:"Compares against a reference frame. Press twice to see a change.",
   hint_color_check:"Counts the share of pixels inside the colour range you set",
-  hint_level_line:"Finds the surface along the line. Runs in the browser, offline.",
-  hint_measure_line:"Measures between edges along the line. Runs in the browser.",
+  hint_level_line:"Re-reads instantly as you change values. The strip and graph below show what it sees.",
+  hint_measure_line:"Re-reads instantly as you change values. The red marks are the edges it found.",
   hint_line_count:"Counting needs tracking across frames — test it for real with Python.",
   hint_zone_count:"Counting needs a detector model — test it for real with Python.",
   hintDefault:"Press \u201cTest now\u201d above to read a value",
@@ -3805,11 +3823,19 @@ function addRoi(x, y, w, h){
   if(roi.shape !== "rect"){
     // a line or a polygon is placed inside the box that was just dragged out
     const dp = defaultPoints(task);
-    roi.points = roi.shape === "line"
-      ? [[x, y + h/2], [x + w, y + h/2]]
-      : [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
-    roi.points = roi.points.map(pt => [ +Math.min(1, Math.max(0, pt[0])).toFixed(4),
-                                        +Math.min(1, Math.max(0, pt[1])).toFixed(4) ]);
+    if(roi.shape === "line"){
+      // a flick of the mouse should still give a line long enough to be useful
+      const long = Math.max(w, h, 0.25);
+      const cx = x + w/2, cy = y + h/2;
+      roi.points = (h > w)
+        ? [[cx, cy + long/2], [cx, cy - long/2]]      // tall drag: vertical, A at the bottom
+        : [[cx - long/2, cy], [cx + long/2, cy]];     // wide drag: horizontal, A on the left
+    } else {
+      const side = Math.max(w, 0.12), tall = Math.max(h, 0.12);
+      roi.points = [[x, y], [x + side, y], [x + side, y + tall], [x, y + tall]];
+    }
+    roi.points = roi.points.map(pt => [ +Math.min(0.995, Math.max(0.005, pt[0])).toFixed(4),
+                                        +Math.min(0.995, Math.max(0.005, pt[1])).toFixed(4) ]);
   }
   c.rois.push(roi);
   select(roi.id); renderRoiList(); invalidate();
@@ -4090,9 +4116,14 @@ P("pTask").onchange = () => {
     if(want === "rect"){ delete r.points; }
     else {
       const b = r.rect || {x:0.3,y:0.4,w:0.4,h:0.2};
-      r.points = want === "line"
-        ? [[b.x, b.y + b.h/2], [b.x + b.w, b.y + b.h/2]]
-        : [[b.x,b.y],[b.x+b.w,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]];
+      if(want === "line"){
+        const long = Math.max(b.w, b.h, 0.25), cx = b.x + b.w/2, cy = b.y + b.h/2;
+        r.points = (b.h > b.w) ? [[cx, cy + long/2], [cx, cy - long/2]]
+                               : [[cx - long/2, cy], [cx + long/2, cy]];
+      } else {
+        const side = Math.max(b.w, 0.12), tall = Math.max(b.h, 0.12);
+        r.points = [[b.x,b.y],[b.x+side,b.y],[b.x+side,b.y+tall],[b.x,b.y+tall]];
+      }
     }
   }
   const m = defaultModel(r.task); if(m) r.model = m; else delete r.model;
@@ -5042,6 +5073,215 @@ function trimQuiet(runs, firstIsBar){
   return {runs: r, firstIsBar: fb};
 }
 
+
+
+function lineProfileFrom(gray, w, h, pts, thickness){
+  const [x0, y0] = pts[0], [x1, y1] = pts[1];
+  const n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0)));
+  const dx = x1 - x0, dy = y1 - y0;
+  const norm = Math.hypot(dx, dy) || 1;
+  const nx = -dy / norm, ny = dx / norm;          // unit normal to the line
+  const half = Math.max(0, Math.floor((+thickness || 1) / 2));
+  const prof = new Float64Array(n);
+  for(let i = 0; i < n; i++){
+    const t = i / (n - 1);
+    const px = x0 + dx * t, py = y0 + dy * t;
+    let acc = 0, used = 0;
+    for(let k = -half; k <= half; k++){
+      const sx = Math.min(w - 1, Math.max(0, Math.round(px + nx * k)));
+      const sy = Math.min(h - 1, Math.max(0, Math.round(py + ny * k)));
+      acc += gray[sy * w + sx];
+      used++;
+    }
+    prof[i] = acc / Math.max(1, used);
+  }
+  return prof;
+}
+
+function smoothProfile(a, k){
+  k = Math.max(1, Math.floor(k)) | 1;
+  if(k < 3) return a;
+  const pad = (k - 1) >> 1, out = new Float64Array(a.length);
+  for(let i = 0; i < a.length; i++){
+    let s = 0;
+    for(let j = -pad; j <= pad; j++){
+      const idx = Math.min(a.length - 1, Math.max(0, i + j));
+      s += a[idx];
+    }
+    out[i] = s / k;
+  }
+  return out;
+}
+
+/* every run of samples above the threshold is one edge; its position is the
+   gradient-weighted centre of that run, which lands between samples where the
+   edge really is instead of on the first sample of the ramp */
+function findEdges(mag, thr){
+  const out = [];
+  let i = 0;
+  while(i < mag.length){
+    if(mag[i] < thr){ i++; continue; }
+    let j = i, weight = 0, acc = 0, peak = i, peakV = -1;
+    while(j < mag.length && mag[j] >= thr){
+      acc += j * mag[j]; weight += mag[j];
+      if(mag[j] > peakV){ peakV = mag[j]; peak = j; }
+      j++;
+    }
+    out.push({pos: (weight > 0 ? acc / weight : i) + 0.5, mag: peakV, peak});
+    i = j;
+  }
+  return out;
+}
+
+function median(arr){
+  const a = Array.from(arr).sort((x, y) => x - y);
+  return a.length ? a[a.length >> 1] : 0;
+}
+function meanOf(a, from, to){
+  let s = 0, n = 0;
+  for(let i = from; i < to; i++){ s += a[i]; n++; }
+  return n ? s / n : 0;
+}
+function stdOf(a, from, to){
+  const m = meanOf(a, from, to);
+  let s = 0, n = 0;
+  for(let i = from; i < to; i++){ s += (a[i] - m) * (a[i] - m); n++; }
+  return n ? Math.sqrt(s / n) : 0;
+}
+
+function pxPerUnit(scale, w, h){
+  if(!scale || !scale.ref_points || scale.ref_points.length !== 2) return null;
+  const L = +scale.ref_length || 0;
+  if(L <= 0) return null;
+  const a = scale.ref_points[0], b = scale.ref_points[1];
+  const px = Math.hypot((b[0] - a[0]) * w, (b[1] - a[1]) * h);
+  return px > 0 ? px / L : null;
+}
+
+/* ---- level along a line ---- */
+function levelFromGray(gray, w, h, pts, p){
+  const prof0 = lineProfileFrom(gray, w, h, pts, p.thickness || 7);
+  const prof = smoothProfile(prof0, p.smooth || 9);
+  if(prof.length < 4) return {value: null, reason: "line too short"};
+  const grad = new Float64Array(prof.length - 1);
+  for(let i = 0; i < grad.length; i++) grad[i] = prof[i + 1] - prof[i];
+
+  const cand = new Float64Array(grad.length);
+  const edge = p.edge || "auto";
+  for(let i = 0; i < grad.length; i++){
+    cand[i] = edge === "dark_to_light" ? Math.max(grad[i], 0)
+            : edge === "light_to_dark" ? Math.max(-grad[i], 0)
+            : Math.abs(grad[i]);
+  }
+  const ignore = p.ignore_ends === undefined ? 0.06 : +p.ignore_ends;
+  const margin = Math.max(1, Math.floor(cand.length * ignore));
+  const lo = cand.length > 2 * margin + 2 ? margin : 0;
+  const hi = cand.length > 2 * margin + 2 ? cand.length - margin : cand.length;
+  let i = lo, best = -1;
+  for(let k = lo; k < hi; k++) if(cand[k] > best){ best = cand[k]; i = k; }
+  const minC = p.min_contrast === undefined ? 6 : +p.min_contrast;
+  if(best < minC) return {value: null, reason: "no clear surface", strength: best};
+
+  // a real surface splits the line into two roughly uniform stretches
+  const split = i + 1;
+  if(split < 3 || prof.length - split < 3)
+    return {value: null, reason: "surface at the very end of the line"};
+  const step = Math.abs(meanOf(prof, 0, split) - meanOf(prof, split, prof.length));
+  const spread = (stdOf(prof, 0, split) + stdOf(prof, split, prof.length)) / 2;
+  if(step < minC) return {value: null, reason: "the two sides look the same", step};
+  const ratio = p.min_step_to_noise === undefined ? 1.2 : +p.min_step_to_noise;
+  if(step < spread * ratio)
+    return {value: null, reason: "the line is too textured to trust", step, spread};
+
+  const found = findEdges(cand, Math.max(minC, best * 0.5));
+  let pos = i + 0.5;
+  if(found.length){
+    let bestE = found[0];
+    for(const e of found) if(Math.abs(e.peak - i) < Math.abs(bestE.peak - i)) bestE = e;
+    pos = bestE.pos;
+  }
+  const frac = Math.min(1, Math.max(0, pos / Math.max(1, prof.length - 1)));
+
+  const v0 = p.value_at_start, v1 = p.value_at_end;
+  const dec = p.decimals === undefined ? 1 : +p.decimals;
+  let value, unit;
+  if(v0 !== undefined && v0 !== null && v1 !== undefined && v1 !== null && v0 !== "" && v1 !== ""){
+    value = +(+v0 + (+v1 - +v0) * frac).toFixed(dec);
+    unit = p.unit || "";
+  } else {
+    value = +(frac * 100).toFixed(dec);
+    unit = "%";
+  }
+  const conf = Math.min(1, step / Math.max(4, minC * 4));
+  return {value, unit, conf, frac, index: i, prof, split: pos, step};
+}
+
+/* ---- dimension between two edges ---- */
+function measureFromGray(gray, w, h, pts, p, scale, fw, fh){
+  const prof0 = lineProfileFrom(gray, w, h, pts, p.thickness || 5);
+  const prof = smoothProfile(prof0, p.smooth || 5);
+  if(prof.length < 4) return {value: null, reason: "line too short"};
+  const mag = new Float64Array(prof.length - 1);
+  const grad = new Float64Array(prof.length - 1);
+  for(let i = 0; i < mag.length; i++){
+    grad[i] = prof[i + 1] - prof[i];
+    mag[i] = Math.abs(grad[i]);
+  }
+  const thr = p.min_contrast === undefined ? 12 : +p.min_contrast;
+  const edges = findEdges(mag, thr);
+  if(edges.length < 2){
+    let mx = 0;
+    for(let i = 0; i < mag.length; i++) mx = Math.max(mx, mag[i]);
+    return {value: null, reason: "fewer than two edges", edges: edges.length,
+            maxGrad: +mx.toFixed(1), prof};
+  }
+
+  let e0, e1;
+  if((p.mode || "outer") === "outer"){
+    e0 = edges[0]; e1 = edges[edges.length - 1];
+  } else {
+    const rising = edges.filter(e => grad[e.peak] > 0);
+    const falling = edges.filter(e => grad[e.peak] < 0);
+    if(!rising.length || !falling.length){ e0 = edges[0]; e1 = edges[edges.length - 1]; }
+    else {
+      e0 = [rising[0], falling[0]].reduce((a, b) => a.pos < b.pos ? a : b);
+      e1 = [rising[rising.length-1], falling[falling.length-1]].reduce((a, b) => a.pos > b.pos ? a : b);
+    }
+  }
+
+  const typical = median(mag) + 1e-6;
+  const ratio = Math.min(e0.mag, e1.mag) / typical;
+  const minRatio = p.min_peak_ratio === undefined ? 3.0 : +p.min_peak_ratio;
+  if(ratio < minRatio)
+    return {value: null, reason: "edges do not stand out from the texture",
+            ratio: +ratio.toFixed(2), prof, edges: edges.length};
+
+  const a = Math.floor(Math.min(e0.pos, e1.pos)) + 1;
+  const b = Math.floor(Math.max(e0.pos, e1.pos)) + 1;
+  const inside = meanOf(prof, a, b);
+  let outSum = 0, outN = 0;
+  for(let i = 0; i < prof.length; i++) if(i < a || i >= b){ outSum += prof[i]; outN++; }
+  if(outN && b > a){
+    const step = Math.abs(inside - outSum / outN);
+    if(step < thr * 0.5)
+      return {value: null, reason: "nothing solid between the edges",
+              step: +step.toFixed(1), prof, edges: edges.length};
+  }
+
+  const totalPx = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
+  const n = Math.max(1, prof.length - 1);
+  const spanPx = Math.abs(e1.pos - e0.pos) / n * totalPx;
+
+  const factor = pxPerUnit(scale, fw, fh);
+  const dec = p.decimals === undefined ? 2 : +p.decimals;
+  let value, unit;
+  if(factor){ value = +(spanPx / factor).toFixed(dec); unit = (scale && scale.unit) || "mm"; }
+  else { value = +spanPx.toFixed(1); unit = "px"; }
+
+  return {value, unit, conf: Math.min(1, Math.min(e0.mag, e1.mag) / 40),
+          px: spanPx, prof, e0: e0.pos, e1: e1.pos, edges: edges.length};
+}
+
 /* ---------------- OCR engine (Tesseract.js), loaded on demand --------- */
 const TESS_URLS = [
   "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
@@ -5195,6 +5435,49 @@ function grayOf(c){
   return out;
 }
 
+
+/* Read the pixels around a line. Only the bounding box of the line is copied,
+   so this stays fast on a 1920x1080 source in live mode. */
+function grayAroundLine(pts, thickness){
+  const el = sourceEl(); if(!el) return null;
+  const f = frameSize();
+  const pad = Math.max(2, (+thickness || 5)) + 2;
+  const x0 = Math.max(0, Math.floor(Math.min(pts[0][0], pts[1][0]) - pad));
+  const y0 = Math.max(0, Math.floor(Math.min(pts[0][1], pts[1][1]) - pad));
+  const x1 = Math.min(f.w, Math.ceil(Math.max(pts[0][0], pts[1][0]) + pad));
+  const y1 = Math.min(f.h, Math.ceil(Math.max(pts[0][1], pts[1][1]) + pad));
+  const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d", {willReadFrequently:true});
+  try { g.drawImage(el, x0, y0, w, h, 0, 0, w, h); }
+  catch(e){ return null; }
+  const d = g.getImageData(0, 0, w, h).data;
+  const gray = new Uint8ClampedArray(w * h);
+  for(let i = 0, j = 0; i < d.length; i += 4, j++)
+    gray[j] = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0;
+  return {gray, w, h, ox: x0, oy: y0, canvas: c};
+}
+
+function roiLinePx(roi){
+  const f = frameSize();
+  return (roi.points || []).slice(0, 2).map(q => [q[0]*f.w, q[1]*f.h]);
+}
+
+function runLineTask(roi){
+  const p = roi.params || {};
+  const pts = roiLinePx(roi);
+  if(pts.length < 2) return null;
+  const src = grayAroundLine(pts, roi.task === "level_line" ? (p.thickness || 7) : (p.thickness || 5));
+  if(!src) return null;
+  const local = pts.map(q => [q[0] - src.ox, q[1] - src.oy]);
+  const f = frameSize();
+  const c = cam();
+  return roi.task === "level_line"
+    ? levelFromGray(src.gray, src.w, src.h, local, p)
+    : measureFromGray(src.gray, src.w, src.h, local, p, c && c.scale, f.w, f.h);
+}
+
 /* ---------------- camera control ---------------- */
 async function listCameras(){
   try{
@@ -5325,6 +5608,13 @@ async function evalRoi(roi){
     }
     return {value:"", conf:0, crop, note: t("codeNotFound")};
   }
+  if(roi.task === "level_line" || roi.task === "measure_line"){
+    const r = runLineTask(roi);
+    if(!r) return {value:null, conf:0, crop, note:t("previewNeedSource")};
+    if(r.value === null || r.value === undefined)
+      return {value:null, conf:0, crop, line:r, note:lineReason(r)};
+    return {value: r.value + (r.unit ? " " + r.unit : ""), conf: r.conf || 0, crop, line:r};
+  }
   if(roi.task === "ocr_text"){
     let img = crop;
     if(roi.params.preprocess){
@@ -5375,6 +5665,22 @@ async function evalAll(){
 }
 
 /* the one button the preview panel tells people to press */
+/* Turn the engine's refusal into something a person can act on. */
+function lineReason(r){
+  const map = {
+    "no clear surface": "noSurface",
+    "the two sides look the same": "sidesSame",
+    "the line is too textured to trust": "tooTextured",
+    "surface at the very end of the line": "surfaceAtEnd",
+    "fewer than two edges": "fewEdges",
+    "edges do not stand out from the texture": "weakEdges",
+    "nothing solid between the edges": "nothingBetween",
+    "line too short": "lineShort"
+  };
+  const key = map[r.reason];
+  return key ? t("lr_" + key) : (r.reason || "");
+}
+
 /* ---------------- preview panel ---------------- */
 let pvPending = false;
 function updatePreview(){
@@ -5393,6 +5699,10 @@ function updatePreviewNow(){
   if(!crop) return;
   const w = crop.width, h = crop.height, pvBin = P("pvBin");
 
+  if(r.task === "level_line" || r.task === "measure_line"){
+    drawLinePreview(r);
+    return;
+  }
   if(r.task !== "digits_7seg"){
     pvBin.width = w; pvBin.height = h;
     const g = pvBin.getContext("2d");
@@ -5444,6 +5754,79 @@ P("btnTestRoi").onclick = async () => {
   b.disabled = false; b.textContent = t("testNow");
   updatePreviewNow(); invalidate();
 };
+
+/* Show the strip of pixels the line actually sampled, straightened out, with
+   the detected positions marked. Seeing the strip is what makes the parameters
+   understandable - a number on its own explains nothing. */
+function drawLinePreview(roi){
+  const pts = roiLinePx(roi);
+  const p = roi.params || {};
+  const th = Math.max(9, (+p.thickness || 5) * 3);
+  const res = live.results[roi.id];
+  const r = (res && res.line) || runLineTask(roi);
+
+  const crop = P("pvCrop"), bin = P("pvBin");
+  const el = sourceEl();
+  const len = Math.max(2, Math.round(Math.hypot(pts[1][0]-pts[0][0], pts[1][1]-pts[0][1])));
+  const W = Math.min(600, Math.max(60, len));
+  crop.width = W; crop.height = th;
+  const g = crop.getContext("2d");
+  g.fillStyle = "#000"; g.fillRect(0, 0, W, th);
+  if(el){
+    // straighten the line into a horizontal strip
+    const ang = Math.atan2(pts[1][1]-pts[0][1], pts[1][0]-pts[0][0]);
+    g.save();
+    g.translate(0, th/2);
+    g.scale(W/len, 1);
+    g.rotate(-ang);
+    g.translate(-pts[0][0], -pts[0][1]);
+    try { g.drawImage(el, 0, 0); } catch(e){}
+    g.restore();
+  }
+  g.strokeStyle = "rgba(230,204,129,.5)"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, th/2 + .5); g.lineTo(W, th/2 + .5); g.stroke();
+  g.fillStyle = "#E6CC81"; g.font = "9px ui-monospace, monospace";
+  g.fillText("A", 2, 9); g.fillText("B", W - 9, 9);
+
+  // the brightness profile underneath, with the found positions marked
+  bin.width = W; bin.height = 64;
+  const b = bin.getContext("2d");
+  b.fillStyle = "#050505"; b.fillRect(0, 0, W, 64);
+  const prof = r && r.prof;
+  if(prof && prof.length > 1){
+    let lo = Infinity, hi = -Infinity;
+    for(const v of prof){ lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    const span = Math.max(1, hi - lo);
+    b.strokeStyle = "#9A9A9A"; b.lineWidth = 1; b.beginPath();
+    for(let i = 0; i < prof.length; i++){
+      const x = i / (prof.length - 1) * W;
+      const y = 60 - (prof[i] - lo) / span * 54;
+      i ? b.lineTo(x, y) : b.moveTo(x, y);
+    }
+    b.stroke();
+    const mark = (pos, colour, label) => {
+      const x = pos / (prof.length - 1) * W;
+      b.strokeStyle = colour; b.lineWidth = 2;
+      b.beginPath(); b.moveTo(x, 0); b.lineTo(x, 64); b.stroke();
+      b.fillStyle = colour; b.font = "9px ui-monospace, monospace";
+      b.fillText(label, Math.min(W - 22, x + 3), 10);
+      // and on the strip above
+      g.strokeStyle = colour; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, th); g.stroke();
+    };
+    if(roi.task === "level_line" && r.split !== undefined) mark(r.split, "#5AB4E0", "level");
+    if(roi.task === "measure_line" && r.e0 !== undefined){
+      mark(r.e0, "#F30006", "1"); mark(r.e1, "#F30006", "2");
+    }
+  }
+
+  const ok = r && r.value !== null && r.value !== undefined;
+  P("pvValue").textContent = ok ? (r.value + (r.unit ? " " + r.unit : "")) : "—";
+  P("pvConf").textContent = ok
+    ? (t("conf") + (r.conf || 0).toFixed(2) +
+       (roi.task === "measure_line" && r.unit === "px" ? " · " + t("noScaleYet") : ""))
+    : (r ? lineReason(r) : t("previewNeedSource"));
+}
 
 /* ---------------- auto-tune + diagnostics ---------------- */
 function showDiag(items, bandText){
