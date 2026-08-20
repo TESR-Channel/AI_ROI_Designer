@@ -8,7 +8,7 @@
 
 No install · no server · nothing leaves your machine
 
-[**Open the tool →**](https://YOUR-ACCOUNT.github.io/YOUR-REPO/)
+[**Open the tool →**](https://tesr-channel.github.io/AI_ROI_Designer/)
 
 *[ภาษาไทยด้านล่าง](#ภาษาไทย)*
 
