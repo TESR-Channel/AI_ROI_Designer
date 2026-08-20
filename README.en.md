@@ -437,6 +437,45 @@ span you intend to measure — that always reads correct and proves nothing.
 
 ---
 
+**Two numbers under the value tell you whether to trust it**
+
+The readout shows the **mark count** and the **distance per gap**.
+
+* Measuring 6→7 cm on a millimetre ruler must show **11 marks** and **1.00 mm per gap**
+* If it shows 10 marks the line missed an end tick, and the value will be 9 mm — **wrong with no warning**,
+  because the per-gap figure still reads 1.00. The mark count is the only thing that catches it.
+
+**The height of the line matters.** It has to sit where the marks physically reach: too high and it clips
+only the tips or misses them, too low and it leaves the scale. Tested on the real screenshot: at the right
+height it finds 11 marks, but 8 pixels higher it finds only 10.
+
+---
+
+### Stop guessing — press Auto-tune
+
+Select a measurement line and look at the **Accuracy check** panel on the right — the same panel the
+digit reader uses.
+
+**Auto-tune** sweeps all three knobs — scan width, smooth and minimum contrast, 160 combinations — and
+keeps the one that **reads the same value across the widest range**, not the one that happens to read
+something once.
+
+In "Between marks" mode there is a second piece of evidence: a real scale has evenly spaced marks. The
+tuner scores that regularity too, so a setting that finds two random blobs cannot beat a tidy row of ticks.
+
+**If nothing works it says so**, rather than emitting a number: the line probably is not crossing the marks.
+And if it does find something whose spacing is more than 15% irregular, it flags the result as not yet
+trustworthy.
+
+Tested on the real ruler photo from a user's screen across 6 cases: auto-tune got 5 right. The one it
+missed had the line dropping off the edge of the scale at one end — visible immediately from the red
+markers on the graph.
+
+**The starting values changed too**, based on those real-image tests: smooth 3 and minimum contrast 20,
+which works straight away in many situations.
+
+---
+
 ### Counting across a line
 
 Draw the line across the walkway. **The gold arrow on the line is the direction counted as "in"** —

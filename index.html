@@ -2598,14 +2598,18 @@ def _marks_along(prof, min_contrast, dark=None):
     thr = bg - depth * 0.5 if dark else bg + depth * 0.5
     sel = prof < thr if dark else prof > thr
 
-    # Random texture also produces "marks". A printed mark stands clear of a
-    # quiet background: measured on real scales the depth is 9x the background
-    # spread or better, while noise sits around 4x, so 6x separates them with
-    # room on both sides.
-    quiet = prof[~sel]
-    if quiet.size > 3:
-        spread = float(quiet.std())
-        if depth < spread * float(6.0):
+    # Random texture also produces "marks", so the depth has to beat the
+    # background's own roughness. That roughness must be measured on the FLAT
+    # stretches between the marks, not across the whole line: where marks are
+    # closely spaced most samples sit on a transition slope, and including them
+    # makes a clean ruler look as rough as noise.
+    #
+    # Measured on real images: printed scales score 11x and up, random noise and
+    # fabric texture score under 7x, so 9x separates them with room either side.
+    plateau = prof[prof >= np.percentile(prof, 70)] if dark else prof[prof <= np.percentile(prof, 30)]
+    if plateau.size > 3:
+        spread = float(plateau.std())
+        if depth < spread * float(9.0):
             return [], dark
 
     runs, i, n = [], 0, len(sel)
@@ -2945,7 +2949,17 @@ th: {
   modeMarks:"ระหว่างขีด (กึ่งกลางถึงกึ่งกลาง)",
   trySwitchMarks:"เจอขีด {n} ขีดบนเส้นนี้ ให้เปลี่ยน Mode เป็น \u201cระหว่างขีด\u201d",
   pMarkPolarity:"สีของขีด", markDark:"ขีดเข้มบนพื้นสว่าง", markLight:"ขีดสว่างบนพื้นเข้ม",
-  marksFound:"ขีด",
+  marksFound:"ขีด", perGap:"ต่อช่อง",
+  ltApplied:"ปรับให้แล้ว อ่านได้ ",
+  ltSettings:"ตั้งเป็น ความหนาเส้นสแกน {scan} · Smooth {smooth} · คอนทราสต์ขั้นต่ำ {contrast} — ค่านี้อ่านได้เท่าเดิมตลอดช่วงคอนทราสต์ {lo} ถึง {hi} และมี {n} ชุดค่าที่ให้ผลนิ่ง",
+  ltSpacing:"ระยะห่างสม่ำเสมอ",
+  ltCheckCount:"ตรวจจำนวนขีดให้ตรงกับที่ตั้งใจวัด เช่น 6→7 ซม. บนไม้บรรทัดมิลลิเมตรต้องได้ 11 ขีด",
+  ltNone:"หาค่าที่อ่านได้นิ่งไม่เจอเลย",
+  ltNoneFix:"เส้นน่าจะไม่ได้ตัดผ่านขีดจริง ลากเส้นลงมาให้อยู่กลางแถบขีด แล้วลองใหม่",
+  ltUntrusted:"ผลนี้ยังไม่น่าเชื่อถือ",
+  ltUntrustedFix:"เจอขีดน้อยเกินไปหรือระยะห่างไม่สม่ำเสมอ มักแปลว่าเส้นอยู่สูงหรือต่ำเกินแถบขีด",
+  ltNoReading:"ยังอ่านค่าไม่ได้",
+  ltReading:"ค่าปัจจุบัน",
   lr_fewMarks:"เจอขีดไม่ถึงสองขีด — ลากเส้นให้ตัดผ่านขีดทั้งสอง และให้เส้นอยู่ในระดับที่ขีดยาวถึง",
   pLabelIn:"ชื่อทิศเข้า", pLabelOut:"ชื่อทิศออก",
   pReport:"ค่าที่ส่งออก", reportAll:"ทั้งหมด", reportNet:"สุทธิ", reportIn:"เข้า", reportOut:"ออก", reportTotal:"รวม",
@@ -3147,7 +3161,17 @@ en: {
   modeMarks:"Between marks (centre to centre)",
   trySwitchMarks:"{n} marks were found along this line — switch Mode to \u201cBetween marks\u201d",
   pMarkPolarity:"Mark colour", markDark:"Dark marks on light", markLight:"Light marks on dark",
-  marksFound:"marks",
+  marksFound:"marks", perGap:"per gap",
+  ltApplied:"Tuned — reading ",
+  ltSettings:"Set to scan width {scan} · smooth {smooth} · minimum contrast {contrast} — this reads the same across contrast {lo} to {hi}, and {n} settings gave a stable result",
+  ltSpacing:"spacing regular",
+  ltCheckCount:"Check the mark count matches what you meant to measure — 6→7 cm on a millimetre ruler must be 11 marks",
+  ltNone:"No setting produced a stable reading",
+  ltNoneFix:"The line probably is not crossing the marks. Move it into the middle of the mark band and try again.",
+  ltUntrusted:"This result is not trustworthy yet",
+  ltUntrustedFix:"Too few marks, or their spacing is irregular — usually means the line sits above or below the mark band",
+  ltNoReading:"No reading yet",
+  ltReading:"Current value",
   lr_fewMarks:"Fewer than two marks found — the line must cross both marks, at a height where the marks actually reach",
   pLabelIn:"Name for in", pLabelOut:"Name for out",
   pReport:"Value to output", reportAll:"All", reportNet:"Net", reportIn:"In", reportOut:"Out", reportTotal:"Total",
@@ -3370,9 +3394,9 @@ function defaultPoints(task){
 }
 function defaultParams(task){
   switch(task){
-    case "level_line":   return {edge:"auto", smooth:9, thickness:7, min_contrast:6,
+    case "level_line":   return {edge:"auto", smooth:9, thickness:7, min_contrast:10,
                                  value_at_start:0, value_at_end:100, unit:"%", decimals:1};
-    case "measure_line": return {mode:"outer", smooth:5, thickness:5, min_contrast:12, decimals:2};
+    case "measure_line": return {mode:"outer", smooth:3, thickness:5, min_contrast:20, decimals:2};
     case "line_count":   return {label_in:"in", label_out:"out", invert:false,
                                  report:"all", classes:[]};
     case "zone_count":   return {anchor:"centroid", classes:[]};
@@ -4005,7 +4029,8 @@ function syncProps(){
   const r = selRoi();
   P("roiPanel").style.display = r ? "" : "none";
   P("previewSec").style.display = r ? "" : "none";
-  P("diagSec").style.display = (r && r.task === "digits_7seg") ? "" : "none";
+  P("diagSec").style.display =
+    (r && ["digits_7seg","level_line","measure_line"].indexOf(r.task) >= 0) ? "" : "none";
   if(!r) return;
   P("roiIdTag").textContent = r.id;
   P("pName").value = r.name; P("pKey").value = r.output_key || r.name;
@@ -5329,16 +5354,25 @@ function marksAlong(prof, minContrast, darkPref){
   const sel = new Uint8Array(prof.length);
   for(let i = 0; i < prof.length; i++) sel[i] = (dark ? prof[i] < thr : prof[i] > thr) ? 1 : 0;
 
-  // random texture makes "marks" too; a printed mark stands clear of a quiet
-  // background, measured at 9x or better on real scales versus about 4x for noise
-  let qs = 0, qn = 0;
-  for(let i = 0; i < prof.length; i++) if(!sel[i]){ qs += prof[i]; qn++; }
-  if(qn > 3){
-    const qm = qs / qn;
-    let v = 0;
-    for(let i = 0; i < prof.length; i++) if(!sel[i]) v += (prof[i]-qm)*(prof[i]-qm);
-    const spread = Math.sqrt(v / qn);
-    if(depth < spread * 6) return {runs: [], dark};
+  // Random texture makes "marks" too, so the depth has to beat the background's
+  // own roughness - measured on the FLAT stretches between marks, not across the
+  // whole line. Where marks are closely spaced most samples sit on a transition
+  // slope, and including those makes a clean ruler look as rough as noise.
+  // Real scales score 11x and up; noise and fabric score under 7x.
+  const ordered = Array.from(prof).sort((a,b) => a-b);
+  const cut = dark ? ordered[Math.floor(ordered.length * 0.70)]
+                   : ordered[Math.floor(ordered.length * 0.30)];
+  const plateau = [];
+  for(let i = 0; i < prof.length; i++)
+    if(dark ? prof[i] >= cut : prof[i] <= cut) plateau.push(prof[i]);
+  if(plateau.length > 3){
+    let m = 0;
+    for(const v of plateau) m += v;
+    m /= plateau.length;
+    let vv = 0;
+    for(const v of plateau) vv += (v-m)*(v-m);
+    const spread = Math.sqrt(vv / plateau.length);
+    if(depth < spread * 9) return {runs: [], dark};
   }
 
   const runs = [];
@@ -6009,9 +6043,92 @@ function drawLinePreview(roi){
   P("pvValue").textContent = ok ? (r.value + (r.unit ? " " + r.unit : "")) : "—";
   P("pvConf").textContent = ok
     ? (t("conf") + (r.conf || 0).toFixed(2) +
-       (r.marks ? " · " + r.marks + " " + t("marksFound") : "") +
+       (r.marks ? " · " + r.marks + " " + t("marksFound") +
+                  (r.marks > 2 ? " · " + (r.value / (r.marks - 1)).toFixed(2) +
+                                 " " + t("perGap") : "") : "") +
        (roi.task === "measure_line" && r.unit === "px" ? " · " + t("noScaleYet") : ""))
     : (r ? lineReason(r) : t("previewNeedSource"));
+}
+
+
+/* ==================================================================
+   Auto-tune for line tasks.
+
+   Same philosophy as the digit auto-tuner: do not pick the setting that
+   happens to read something once, pick the one that keeps reading the SAME
+   thing while the knobs move. For marks mode there is a second piece of
+   evidence available - a printed scale has evenly spaced marks - so an odd
+   setting that finds two random blobs cannot beat a regular row of ticks.
+   ================================================================== */
+const TUNE_THICK = [1, 3, 5, 9, 15];
+const TUNE_SMOOTH = [1, 3, 5, 9];
+const TUNE_CONTRAST = [8, 12, 16, 20, 25, 30, 40, 50];
+
+function spacingRegularity(centres){
+  if(!centres || centres.length < 3) return 0;
+  const gaps = [];
+  for(let i = 1; i < centres.length; i++) gaps.push(centres[i] - centres[i-1]);
+  const m = gaps.reduce((a,b) => a+b, 0) / gaps.length;
+  if(m <= 0) return 0;
+  let v = 0;
+  for(const gp of gaps) v += (gp-m)*(gp-m);
+  return Math.max(0, 1 - Math.sqrt(v/gaps.length)/m);
+}
+
+function autoTuneLine(roi){
+  const isLevel = roi.task === "level_line";
+  const base = Object.assign({}, roi.params);
+  const cands = [];
+
+  for(const th of TUNE_THICK){
+    for(const sm of TUNE_SMOOTH){
+      const rows = TUNE_CONTRAST.map(c => {
+        const probe = Object.assign({}, roi, {
+          params: Object.assign({}, base, {thickness: th, smooth: sm, min_contrast: c})
+        });
+        const r = runLineTask(probe);
+        if(!r || r.value === null || r.value === undefined) return null;
+        return {key: (r.marks || 0) + "|" + (+r.value).toFixed(2), value: +r.value,
+                marks: r.marks || 0, centres: r.centres};
+      });
+
+      // longest run of consecutive contrast values giving the identical reading
+      let start = null, best = null;
+      for(let i = 0; i <= rows.length; i++){
+        const same = i < rows.length && rows[i] && (start === null || rows[i].key === rows[start].key);
+        if(same){ if(start === null) start = i; }
+        else {
+          if(start !== null){
+            const run = [start, i-1];
+            if(!best || (run[1]-run[0]) > (best[1]-best[0])) best = run;
+            start = (i < rows.length && rows[i]) ? i : null;
+          }
+        }
+      }
+      if(!best) continue;
+      const mid = (best[0] + best[1]) >> 1;
+      cands.push({thickness: th, smooth: sm, contrast: TUNE_CONTRAST[mid],
+                  band: best[1]-best[0]+1, lo: TUNE_CONTRAST[best[0]], hi: TUNE_CONTRAST[best[1]],
+                  value: rows[mid].value, marks: rows[mid].marks,
+                  reg: spacingRegularity(rows[mid].centres)});
+    }
+  }
+  if(!cands.length) return null;
+
+  // the consensus reading across every stable setting; one odd setting cannot win
+  const vals = cands.map(c => c.value).sort((a,b) => a-b);
+  const consensus = vals[vals.length >> 1];
+  cands.forEach(c => {
+    c.score = c.band * 8 - Math.abs(c.value - consensus) * 30
+              + (isLevel ? 0 : c.reg * 25) + c.thickness * 0.01;
+  });
+  const pick = cands.reduce((a, b) => b.score > a.score ? b : a);
+  pick.consensus = consensus;
+  pick.candidates = cands.length;
+  // marks mode with two blobs and no regular spacing is not a scale reading
+  pick.trustworthy = isLevel ? true
+       : (base.mode === "marks" ? (pick.marks >= 3 && pick.reg >= 0.85) : true);
+  return pick;
 }
 
 /* ---------------- auto-tune + diagnostics ---------------- */
@@ -6039,6 +6156,9 @@ function currentGray(){
   return {gray: grayOf(crop), w: crop.width, h: crop.height};
 }
 P("btnDiag").onclick = () => {
+  const sel0 = selRoi();
+  if(sel0 && (sel0.task === "level_line" || sel0.task === "measure_line"))
+    return diagnoseLineUi(sel0);
   const r = selRoi(), src = currentGray();
   if(!r || !src) return toast(t("needImage"));
   const res = readDigits(src.gray, src.w, src.h, r.params);
@@ -6046,6 +6166,9 @@ P("btnDiag").onclick = () => {
   showDiag(d.notes, "sat " + (d.sat*100).toFixed(0) + "% · spread " + d.spread);
 };
 P("btnAutoTune").onclick = () => {
+  const sel0 = selRoi();
+  if(sel0 && (sel0.task === "level_line" || sel0.task === "measure_line"))
+    return autoTuneLineUi(sel0);
   const r = selRoi(), src = currentGray();
   if(!r || !src) return toast(t("needImage"));
   P("btnAutoTune").disabled = true;
@@ -6094,6 +6217,73 @@ P("btnAutoTune").onclick = () => {
     toast(t("tuneDone"));
   }, 30);
 };
+
+function autoTuneLineUi(roi){
+  if(!sourceEl()) return toast(t("needImage"));
+  const b = P("btnAutoTune");
+  b.disabled = true; b.textContent = t("autoTuning");
+  setTimeout(() => {
+    let best = null;
+    try { best = autoTuneLine(roi); }
+    catch(e){ toast(t("tuneFailed") + e.message); }
+    b.disabled = false; b.textContent = t("autoTune");
+
+    if(!best){
+      showDiag([{level:"bad", msg: t("ltNone"), fix: t("ltNoneFix")}], t("tuneNone"));
+      return;
+    }
+    Object.assign(roi.params, {thickness: best.thickness, smooth: best.smooth,
+                               min_contrast: best.contrast});
+    syncProps(); updatePreviewNow(); invalidate();
+
+    const notes = [{
+      level: best.trustworthy ? (best.band >= 4 ? "ok" : "warn") : "bad",
+      msg: t("ltApplied") + best.value + (roi.task === "measure_line" ? "" : ""),
+      fix: t("ltSettings")
+             .replace("{scan}", best.thickness)
+             .replace("{smooth}", best.smooth)
+             .replace("{contrast}", best.contrast)
+             .replace("{lo}", best.lo).replace("{hi}", best.hi)
+             .replace("{n}", best.candidates),
+      bar: Math.min(1, best.band / TUNE_CONTRAST.length)
+    }];
+    if(best.marks)
+      notes.push({level: best.reg >= 0.9 ? "ok" : "warn",
+                  msg: best.marks + " " + t("marksFound") + " · " + t("ltSpacing") +
+                       " " + (best.reg*100).toFixed(0) + "%",
+                  fix: t("ltCheckCount")});
+    if(!best.trustworthy)
+      notes.push({level:"bad", msg: t("ltUntrusted"), fix: t("ltUntrustedFix")});
+    showDiag(notes, "band " + best.band + "/" + TUNE_CONTRAST.length);
+    toast(t("tuneDone"));
+  }, 30);
+}
+
+function diagnoseLineUi(roi){
+  if(!sourceEl()) return toast(t("needImage"));
+  const r = runLineTask(roi);
+  const notes = [];
+  if(!r || r.value === null || r.value === undefined){
+    notes.push({level:"bad", msg: t("ltNoReading"), fix: r ? lineReason(r) : t("previewNeedSource")});
+  } else {
+    notes.push({level:"ok", msg: t("ltReading") + " " + r.value + " " + (r.unit || ""),
+                fix: t("ltSettings")
+                       .replace("{scan}", roi.params.thickness || 5)
+                       .replace("{smooth}", roi.params.smooth || 5)
+                       .replace("{contrast}", roi.params.min_contrast || 12)
+                       .replace("{lo}", "-").replace("{hi}", "-").replace("{n}", "1")});
+    if(r.marks){
+      const reg = spacingRegularity(r.centres);
+      notes.push({level: reg >= 0.9 ? "ok" : "warn",
+                  msg: r.marks + " " + t("marksFound") + " · " + t("ltSpacing") + " " +
+                       (reg*100).toFixed(0) + "%",
+                  fix: t("ltCheckCount")});
+    }
+    if(roi.task === "measure_line" && r.unit === "px")
+      notes.push({level:"warn", msg: t("noScaleYet"), fix: t("scaleHint")});
+  }
+  showDiag(notes, "");
+}
 
 /* ---------------- model library UI ---------------- */
 function renderModels(){
