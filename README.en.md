@@ -348,6 +348,37 @@ Tested against parts of exactly known width: **0.26 px** error, and after calibr
 > known standard part on site, and the camera should be as close to perpendicular to the
 > measured plane as the installation allows.
 
+### Measuring a dimension, step by step
+
+**1. Set the camera scale first** (once per camera installation)
+
+Put something of exactly known size in the same plane as the part — a tape measure or a gauge.
+Press **Draw reference line**, drag along a known distance (say the 0 to 10 cm marks),
+then type `100` as the real length and `mm` as the unit.
+
+A longer reference is a better one: spanning 10 cm is far more accurate than spanning 1 cm.
+
+**2. Draw the measurement line right across the part**
+
+The mistake almost everyone makes: **both ends of the line must land on background, not on the part.**
+
+```
+right:  ────┤████████████├────     both ends off the part
+wrong:      ├──████████──┤         line too short, ends sit on the part
+```
+
+The tool finds the first and last edge along the line and measures between them.
+If an end sits on the part, there is no edge there to find.
+
+**3. Read the panel on the right**
+
+The upper strip is the actual pixels the line passes over, straightened out.
+The graph below is brightness along the line, and **the two red marks are the edges it found.**
+
+If a red mark lands in the wrong place you can see it immediately rather than guessing.
+
+---
+
 ### Counting across a line
 
 Draw the line across the walkway. **The gold arrow on the line is the direction counted as "in"** —
