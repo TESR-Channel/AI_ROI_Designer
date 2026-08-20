@@ -411,6 +411,32 @@ angle will do worse; measure a known standard on site to find out by how much.
 
 ---
 
+### How long should the reference line be
+
+As long as you can make it. A few pixels of sloppiness when dragging the reference by hand gets divided
+by its length, so a longer reference shrinks the error in proportion.
+
+Measured by deliberately misplacing one end of the reference by 3 pixels, then measuring a true 10.000 mm span:
+
+| Reference spans | Reading | Error |
+|---|---|---|
+| 5 mm | 9.854 | −0.146 mm |
+| 10 mm | 9.926 | −0.074 mm |
+| 20 mm | 9.962 | −0.038 mm |
+
+**Rule of thumb**: make the reference at least a third of the image width, and never calibrate on the same
+span you intend to measure — that always reads correct and proves nothing.
+
+### How do I know the reading is right
+
+1. **Check the mark count** shown under the value. Measuring 6→7 cm on a ruler with millimetre ticks should
+   report 11 marks (11 marks = 10 intervals = 10 mm). Twelve means the line reached one tick too far.
+2. **Look at the red lines on the graph** — they should sit exactly on the 6 and the 7.
+3. **Measure something you already know.** Calibrate over 3 cm, then measure 1 cm. If it says 10.0 mm, the
+   setup is sound.
+
+---
+
 ### Counting across a line
 
 Draw the line across the walkway. **The gold arrow on the line is the direction counted as "in"** —

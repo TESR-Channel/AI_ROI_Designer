@@ -2688,8 +2688,10 @@ def task_measure(frame, roi, ctx):
     typical = float(np.median(mag)) + 1e-6
     ratio = min(e0[1], e1[1]) / typical
     if ratio < float(p.get("min_peak_ratio", 3.0)):
+        marks, _ = _marks_along(prof, thr)
         return None, 0.0, {"reason": "edges do not stand out from the texture",
-                           "ratio": round(ratio, 2)}
+                           "ratio": round(ratio, 2),
+                           "suggest_marks": len(marks) if len(marks) >= 2 else 0}
 
     # the material between the two edges must differ from the background,
     # otherwise two unrelated features are being measured as if they were a part
@@ -2699,8 +2701,10 @@ def task_measure(frame, roi, ctx):
     if inside.size and outside.size:
         step = abs(float(inside.mean()) - float(outside.mean()))
         if step < thr * 0.5:
+            marks, _ = _marks_along(prof, thr)
             return None, 0.0, {"reason": "nothing solid between the edges",
-                               "step": round(step, 1)}
+                               "step": round(step, 1),
+                               "suggest_marks": len(marks) if len(marks) >= 2 else 0}
 
     span_px = abs(e1[0] - e0[0]) / n * total_px
 
@@ -2939,6 +2943,7 @@ th: {
   pThickness:"ความหนาเส้นสแกน", pSmooth:"Smooth", pMinContrast:"คอนทราสต์ขั้นต่ำ",
   pMode:"โหมด", modeOuter:"ขอบนอกสุด", modeInner:"คู่ขอบที่ชัดที่สุด",
   modeMarks:"ระหว่างขีด (กึ่งกลางถึงกึ่งกลาง)",
+  trySwitchMarks:"เจอขีด {n} ขีดบนเส้นนี้ ให้เปลี่ยน Mode เป็น \u201cระหว่างขีด\u201d",
   pMarkPolarity:"สีของขีด", markDark:"ขีดเข้มบนพื้นสว่าง", markLight:"ขีดสว่างบนพื้นเข้ม",
   marksFound:"ขีด",
   lr_fewMarks:"เจอขีดไม่ถึงสองขีด — ลากเส้นให้ตัดผ่านขีดทั้งสอง และให้เส้นอยู่ในระดับที่ขีดยาวถึง",
@@ -3140,6 +3145,7 @@ en: {
   pThickness:"Scan width", pSmooth:"Smooth", pMinContrast:"Minimum contrast",
   pMode:"Mode", modeOuter:"Outermost edges", modeInner:"Strongest opposing pair",
   modeMarks:"Between marks (centre to centre)",
+  trySwitchMarks:"{n} marks were found along this line — switch Mode to \u201cBetween marks\u201d",
   pMarkPolarity:"Mark colour", markDark:"Dark marks on light", markLight:"Light marks on dark",
   marksFound:"marks",
   lr_fewMarks:"Fewer than two marks found — the line must cross both marks, at a height where the marks actually reach",
@@ -5351,6 +5357,15 @@ function marksAlong(prof, minContrast, darkPref){
   return {runs, dark};
 }
 
+/* Would "between marks" have succeeded on this same line? Used to turn a dead
+   end into a specific instruction. */
+function marksWouldWork(prof, thr){
+  try {
+    const {runs} = marksAlong(prof, thr, "auto");
+    return runs.length >= 2 ? runs.length : 0;
+  } catch(e){ return 0; }
+}
+
 /* ---- dimension between two edges ---- */
 function measureFromGray(gray, w, h, pts, p, scale, fw, fh){
   const prof0 = lineProfileFrom(gray, w, h, pts, p.thickness || 5);
@@ -5408,7 +5423,8 @@ function measureFromGray(gray, w, h, pts, p, scale, fw, fh){
   const minRatio = p.min_peak_ratio === undefined ? 3.0 : +p.min_peak_ratio;
   if(ratio < minRatio)
     return {value: null, reason: "edges do not stand out from the texture",
-            ratio: +ratio.toFixed(2), prof, edges: edges.length};
+            ratio: +ratio.toFixed(2), prof, edges: edges.length,
+            suggest: marksWouldWork(prof, thr)};
 
   const a = Math.floor(Math.min(e0.pos, e1.pos)) + 1;
   const b = Math.floor(Math.max(e0.pos, e1.pos)) + 1;
@@ -5419,7 +5435,8 @@ function measureFromGray(gray, w, h, pts, p, scale, fw, fh){
     const step = Math.abs(inside - outSum / outN);
     if(step < thr * 0.5)
       return {value: null, reason: "nothing solid between the edges",
-              step: +step.toFixed(1), prof, edges: edges.length};
+              step: +step.toFixed(1), prof, edges: edges.length,
+              suggest: marksWouldWork(prof, thr)};
   }
 
   const totalPx = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
@@ -5821,6 +5838,12 @@ async function evalAll(){
 /* the one button the preview panel tells people to press */
 /* Turn the engine's refusal into something a person can act on. */
 function lineReason(r){
+  const base = lineReasonText(r);
+  if(r && r.suggest)
+    return base + "  →  " + t("trySwitchMarks").replace("{n}", r.suggest);
+  return base;
+}
+function lineReasonText(r){
   const map = {
     "no clear surface": "noSurface",
     "the two sides look the same": "sidesSame",

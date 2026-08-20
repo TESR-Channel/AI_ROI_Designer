@@ -401,8 +401,10 @@ def task_measure(frame, roi, ctx):
     typical = float(np.median(mag)) + 1e-6
     ratio = min(e0[1], e1[1]) / typical
     if ratio < float(p.get("min_peak_ratio", 3.0)):
+        marks, _ = _marks_along(prof, thr)
         return None, 0.0, {"reason": "edges do not stand out from the texture",
-                           "ratio": round(ratio, 2)}
+                           "ratio": round(ratio, 2),
+                           "suggest_marks": len(marks) if len(marks) >= 2 else 0}
 
     # the material between the two edges must differ from the background,
     # otherwise two unrelated features are being measured as if they were a part
@@ -412,8 +414,10 @@ def task_measure(frame, roi, ctx):
     if inside.size and outside.size:
         step = abs(float(inside.mean()) - float(outside.mean()))
         if step < thr * 0.5:
+            marks, _ = _marks_along(prof, thr)
             return None, 0.0, {"reason": "nothing solid between the edges",
-                               "step": round(step, 1)}
+                               "step": round(step, 1),
+                               "suggest_marks": len(marks) if len(marks) >= 2 else 0}
 
     span_px = abs(e1[0] - e0[0]) / n * total_px
 
