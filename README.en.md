@@ -685,6 +685,7 @@ or train a plate-detector model and crop from its box.
 
 | Symptom | Usual cause | Fix |
 |---|---|---|
+| `The function is not implemented. Rebuild the library with...` | `opencv-python-headless` is installed, which has no GUI | Nothing to fix — the runner detects this, says so once and carries on without a window. Readings still reach the console and every configured output. `--calibrate` is the one thing that cannot work; tune in the browser instead |
 | Some digits read as `?` | Threshold is off, or the ROI hugs the digits too tightly | `--calibrate` to adjust threshold/min_fill; widen the ROI a little |
 | Wrong number of digits | The gaps between digits are narrow and get merged | Set `digits` to the real count, or switch `split` to fixed |
 | The value keeps changing | Flickering light or a camera that moves | Raise `stable_frames`, mount the camera rigidly, kill the glare |

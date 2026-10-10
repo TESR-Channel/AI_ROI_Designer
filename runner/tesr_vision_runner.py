@@ -80,6 +80,36 @@ def now_iso():
     return datetime.now().isoformat(timespec="seconds")
 
 
+_GUI = None
+
+
+def gui_available():
+    """Can this OpenCV build open a window at all?
+
+    `pip install opencv-python-headless` - the sensible choice on a Pi, a
+    Jetson running as a service, or any machine with no display - ships HighGUI
+    as stubs that raise. Asking once, instead of finding out from an exception
+    while shutting down, is the difference between "running headless" and
+    "crashed on exit".
+    """
+    global _GUI
+    if _GUI is None:
+        try:
+            cv2.destroyAllWindows()
+            _GUI = True
+        except Exception:
+            _GUI = False
+    return _GUI
+
+
+def close_windows():
+    if gui_available():
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+
+
 def ensure_dir(path):
     if path:
         d = os.path.dirname(os.path.abspath(path))
@@ -1673,6 +1703,11 @@ def run(cfg, args):
     source = args.source or args.image or cam.get("source", "0")
     rt = cfg["runtime"]
     show = (rt.get("show_window", True) or args.test) and not args.headless
+    if show and not gui_available():
+        log("this OpenCV build has no GUI (opencv-python-headless) - running "
+            "without a window. Readings still go to the console and to every "
+            "output you configured.", "WARN")
+        show = False
     console = args.console or rt.get("console", "summary")
 
     rois = [r for r in cam.get("rois", []) if r.get("enabled", True)]
@@ -1880,7 +1915,7 @@ def run(cfg, args):
             save_counter_state(state_path, ctx["counters"])
         src.release()
         bus.close()
-        cv2.destroyAllWindows()
+        close_windows()
         log("stopped cleanly")
 
 
@@ -1900,6 +1935,12 @@ def calibrate(cfg, args):
     src = FrameSource(args.source or args.image or cam.get("source", "0"),
                       cam.get("width", 0), cam.get("height", 0))
     win = "calibrate: %s" % roi["name"]
+    if not gui_available():
+        raise SystemExit(
+            "[FATAL] --calibrate needs a window and this OpenCV build has none.\n"
+            "        opencv-python-headless is installed. Either calibrate on a\n"
+            "        machine with a display, or tune the values in TESR ROI Studio\n"
+            "        in a browser and export the config again.")
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     p = roi.setdefault("params", {})
     cv2.createTrackbar("threshold", win, int(p.get("threshold", 128)), 255, lambda v: None)
@@ -1937,7 +1978,7 @@ def calibrate(cfg, args):
                 break
     finally:
         src.release()
-        cv2.destroyAllWindows()
+        close_windows()
     print("\nparams tuned for ROI '%s' - paste this back into your config:" % roi["name"])
     print(json.dumps(p, indent=2))
 
