@@ -35,21 +35,24 @@ def check(name, got, want):
 
 
 WORK = tempfile.mkdtemp(prefix="tesr_counter_")
-VIDEO = os.path.join(WORK, "gate.mp4")
+FRAMES = os.path.join(WORK, "frames")
+# An image sequence rather than a video file: OpenCV reads a %04d pattern with
+# no codec at all, so this test behaves the same on a headless wheel, on a Pi
+# and on a CI runner, none of which are guaranteed to have an mp4 encoder.
+VIDEO = os.path.join(FRAMES, "%04d.png")
 STATE = os.path.join(WORK, "counters_{camera}.json")
 W, H, N = 320, 240, 24
 
 
 def make_video():
     """One box walking left to right across the middle of the frame."""
-    vw = cv2.VideoWriter(VIDEO, cv2.VideoWriter_fourcc(*"mp4v"), 10, (W, H))
+    os.makedirs(FRAMES, exist_ok=True)
     for i in range(N):
         f = np.full((H, W, 3), 30, np.uint8)
         x = int(20 + (W - 80) * i / float(N - 1))
         cv2.rectangle(f, (x, 90), (x + 40, 150), (220, 220, 220), -1)
-        vw.write(f)
-    vw.release()
-    return os.path.isfile(VIDEO)
+        cv2.imwrite(os.path.join(FRAMES, "%04d.png" % i), f)
+    return len(os.listdir(FRAMES)) == N
 
 
 def box_detector(frame, det):
@@ -128,7 +131,7 @@ def run(cfg, reset_counters=False):
 
 
 print("--- a box crosses the gate, counted through the real loop ---")
-check("test video written", make_video(), True)
+check("test frames written", make_video(), True)
 
 cfg = config({"mode": "shift", "shifts": ["06:00", "14:00", "22:00"]})
 run(cfg)

@@ -53,7 +53,21 @@ const win = dom.window;
 // page's own globals have to be read inside its own scope
 const G = name => win.eval(name);
 
-setTimeout(() => {
+// Wait for the page's own boot to finish rather than guessing at a delay: a
+// slow CI runner needs longer than a laptop, and a fixed timeout that is too
+// short fails for the wrong reason.
+function whenReady(done, waited = 0) {
+  let ready = false;
+  try { ready = typeof win.eval("I18N") === "object"; } catch (e) { ready = false; }
+  if (ready && waited >= 300) return done();
+  if (waited > 20000) {
+    fail.push("the page did not finish booting within 20s");
+    return done();
+  }
+  setTimeout(() => whenReady(done, waited + 100), 100);
+}
+
+whenReady(() => {
   console.log("--- boot ---");
   check("no uncaught error at boot",
         errors.filter(e => !/getContext|not implemented|Could not parse/i.test(e)), []);
@@ -143,4 +157,4 @@ setTimeout(() => {
   console.log("all page checks passed");
   dom.window.close();          // the render loop would otherwise keep node alive
   process.exit(0);
-}, 1200);
+});
