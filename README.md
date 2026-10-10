@@ -10,6 +10,8 @@ No install · no server · nothing leaves your machine
 
 [**Open the tool →**](https://tesr-channel.github.io/AI_ROI_Designer/)
 
+https://tesr-channel.github.io/AI_ROI_Designer/
+
 *[ภาษาไทยด้านล่าง](#ภาษาไทย)*
 
 </div>
@@ -24,6 +26,7 @@ Point a camera at a machine, a tank, a doorway or a conveyor, mark what you care
 |---|---|---|---|
 | Box | `digits_7seg` | Read a 7-segment or LCD panel on a machine | No |
 | Box | `ocr_text` | Read printed text or numbers | No |
+| Box | `plate_ocr` | Licence plate — ROI → OCR, with the plate format enforced | No |
 | Box | `barcode_qr` | QR, Code 128, Code 39, EAN-13, UPC-A, EAN-8, ITF | No |
 | Box | `color_check` | Tower light, status lamp, part colour | No |
 | Box | `presence_diff` | Something appeared, moved or went missing | No |
@@ -34,6 +37,13 @@ Point a camera at a machine, a tank, a doorway or a conveyor, mark what you care
 | Zone | `zone_count` | How many things are inside an area right now | Yes |
 
 Each region publishes its own value. One camera can do several jobs at once.
+
+Counting lines keep two sets of numbers: the current shift, and a running total since
+installation. **Runtime → Reset counters** sets the boundary — per shift, daily, hourly
+or every N minutes. At each boundary the closing numbers go out as a `period_end` event
+on MQTT before the counter returns to zero, so a dashboard can file a shift against the
+shift that produced it. Give it a state file and the count survives a power cut
+mid-shift; a restart after the shift changed starts the new shift at zero.
 
 ---
 
@@ -57,6 +67,13 @@ cd runner
 python tesr_vision_runner.py --selftest
 python tesr_vision_runner.py --config ../examples/demo_config.json --once
 python tesr_vision_runner.py --config ../examples/meters_grouped.json --once --auto-group
+python tesr_vision_runner.py --config ../examples/plate_config.json --once
+```
+
+Running the checks yourself:
+
+```bash
+bash tests/run_all.sh
 ```
 
 ---
@@ -78,6 +95,8 @@ runner/
   tesr_line_engine.py         level, dimension, line counting, zone counting
   requirements.txt
 examples/                     configs and images you can run immediately
+tests/                        the checks behind every claim in this README
+tools/embed_python.py         keeps the exported Python identical to runner/
 ```
 
 Both Python files are also embedded in `index.html`, so the export button hands them to you without cloning anything.
@@ -122,11 +141,19 @@ Camera frames, uploaded images and model files **never leave the machine**. Mode
 
 ## Publishing your own copy
 
-1. Upload this repository to GitHub
-2. **Settings → Pages → Source**, choose **GitHub Actions**
-3. Push to `main`; the included workflow deploys in about a minute
+1. Fork or upload this repository to GitHub
+2. **Settings → Pages → Source**, choose **Deploy from a branch** → `main` / root
+3. Wait about a minute, then open `https://<account>.github.io/<repo>/`
 
-Update the link at the top of this file to your own Pages URL.
+`index.html` sits at the repository root for exactly this reason, so no build step is
+involved — the page you push is the page that is served.
+
+Then update the link at the top of this file to your own Pages URL.
+
+The included workflow (`.github/workflows/ci.yml`) does not deploy; it runs the test
+suite on every push. **If you change anything in `runner/`, run
+`python3 tools/embed_python.py` before committing** — the export button hands visitors
+the copy embedded in `index.html`, and the CI check fails if the two have drifted.
 
 ---
 
@@ -161,6 +188,7 @@ MIT — see [LICENSE](LICENSE). Bundled and CDN components are listed in [THIRD_
 |---|---|---|---|
 | กรอบ | อ่านตัวเลข 7-segment | อ่านค่าจากจอเครื่องจักร | ไม่ต้อง |
 | กรอบ | OCR | อ่านข้อความหรือตัวเลขทั่วไป | ไม่ต้อง |
+| กรอบ | อ่านป้ายทะเบียน | ROI → OCR พร้อมตรวจรูปแบบป้าย | ไม่ต้อง |
 | กรอบ | Barcode / QR | QR, Code 128, Code 39, EAN-13, UPC-A, EAN-8, ITF | ไม่ต้อง |
 | กรอบ | ตรวจสี | ไฟหอคอย ไฟสถานะ สีชิ้นงาน | ไม่ต้อง |
 | กรอบ | ตรวจการเปลี่ยนแปลง | มีของมาวาง ของหาย ของขยับ | ไม่ต้อง |
@@ -169,6 +197,12 @@ MIT — see [LICENSE](LICENSE). Bundled and CDN components are listed in [THIRD_
 | เส้น | วัดขนาด | ความกว้างชิ้นงาน ระยะห่าง เป็นมิลลิเมตร | ไม่ต้อง |
 | เส้น | นับข้ามเส้น | นับคนเข้าออก นับรถ นับชิ้นงาน แยกทิศทาง | ต้องมี |
 | พื้นที่ | นับในพื้นที่ | มีกี่คน กี่ชิ้น อยู่ในพื้นที่ตอนนี้ | ต้องมี |
+
+เส้นนับเก็บตัวเลขสองชุด คือยอดของกะปัจจุบัน และยอดรวมตั้งแต่เริ่มติดตั้ง
+ตั้งเวลารีเซ็ตได้ที่ **Runtime → รีเซ็ตตัวนับ** เลือกได้ตามกะ รายวัน รายชั่วโมง หรือทุก N นาที
+เมื่อถึงเวลารีเซ็ต ยอดปิดกะจะถูกส่งออกเป็น event `period_end` ทาง MQTT ก่อนเริ่มนับใหม่จากศูนย์
+ทำให้ Dashboard บันทึกยอดเข้ากะที่ถูกต้องได้ และถ้าใส่ไฟล์เก็บยอดนับไว้ ไฟดับกลางกะแล้วเปิดใหม่จะนับต่อจากเดิม
+ส่วนถ้าเปิดใหม่ข้ามกะไปแล้ว กะใหม่จะเริ่มที่ศูนย์
 
 ## เริ่มใช้
 

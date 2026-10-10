@@ -1,0 +1,29 @@
+# Model weights belong to whoever trained them, not in this repository
+*.onnx
+*.pt
+*.engine
+*.tflite
+*.hef
+
+# Produced by running the tool
+logs/
+captures/
+*_config.json
+!examples/*_config.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node, only used by the tests
+node_modules/
+package.json
+package-lock.json
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

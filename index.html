@@ -449,6 +449,22 @@
       <div><label>Webhook URL</label><input id="rtWhUrl" placeholder="http://server/api/vision"></div>
     </div>
     <p class="hint" style="margin-top:12px" data-i18n-html="rtNote"></p>
+    <h3 style="margin:18px 0 8px;font-size:13px;letter-spacing:.08em;text-transform:uppercase"
+        data-i18n="rtReset"></h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label data-i18n="rtReset"></label><select id="rtReset">
+        <option value="none" data-i18n="rtResetNone"></option>
+        <option value="shift" data-i18n="rtResetShift"></option>
+        <option value="daily" data-i18n="rtResetDaily"></option>
+        <option value="hourly" data-i18n="rtResetHourly"></option>
+        <option value="minutes" data-i18n="rtResetMin"></option></select></div>
+      <div><label data-i18n="rtShifts"></label><input id="rtShifts" placeholder="06:00, 14:00, 22:00"></div>
+      <div><label data-i18n="rtResetAt"></label><input id="rtResetAt" placeholder="00:00"></div>
+      <div><label data-i18n="rtResetMins"></label><input id="rtResetMins" type="number" min="1" step="1"></div>
+      <div style="grid-column:1/-1"><label data-i18n="rtStateFile"></label>
+        <input id="rtStateFile" placeholder="logs/counters_{camera}.json"></div>
+    </div>
+    <p class="hint" style="margin-top:10px" data-i18n-html="rtResetNote"></p>
   </div>
 </dialog>
 
@@ -466,7 +482,7 @@
 TESR Edge AI Vision Runner
 ==========================
 Thai Embedded Systems and Robotics — Build, Train and Deploy AI to Edge Devices
-Runs the ROI configuration exported from TESR ROI Studio (roi_designer.html).
+Runs the ROI configuration exported from TESR ROI Studio (index.html).
 
 One config file -> many cameras -> many ROIs -> one task per ROI.
 Runs on Windows / macOS / Linux / Raspberry Pi / NVIDIA Jetson with the same code.
@@ -482,6 +498,7 @@ Usage
     python tesr_vision_runner.py --config config.json --source rtsp://... --test
     python tesr_vision_runner.py --config config.json --image sample.jpg --once
     python tesr_vision_runner.py --config config.json --calibrate roi_1
+    python tesr_vision_runner.py --config config.json --headless --reset-counters
     python tesr_vision_runner.py --config config.json --selftest
 
 Author: TESR Co., Ltd. - Thai Embedded Systems and Robotics
@@ -510,7 +527,7 @@ except ImportError:  # pragma: no cover
     )
     raise
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 SCHEMA = "tesr.roi.v1"
 
 # The line and zone engine lives in its own module so it can be tested on its
@@ -563,6 +580,12 @@ DEFAULT_RUNTIME = {
     "mqtt": {"enabled": False, "host": "localhost", "port": 1883,
              "topic_prefix": "tesr/vision", "username": "", "password": ""},
     "webhook": {"enabled": False, "url": ""},
+    # When the directional counters go back to zero. "shift" uses the times in
+    # "shifts"; see PeriodClock in tesr_line_engine.py for the other modes.
+    # state_file keeps the counts across a reboot, which matters on a Pi that
+    # loses power more often than it finishes a shift.
+    "counter_reset": {"mode": "none", "at": "00:00", "shifts": [],
+                      "minutes": 60, "state_file": ""},
 }
 
 
@@ -574,7 +597,7 @@ def load_config(path):
             % (cfg.get("schema"), SCHEMA), "WARN")
     rt = dict(DEFAULT_RUNTIME)
     rt.update(cfg.get("runtime") or {})
-    for key in ("mqtt", "webhook"):
+    for key in ("mqtt", "webhook", "counter_reset"):
         merged = dict(DEFAULT_RUNTIME[key])
         merged.update(rt.get(key) or {})
         rt[key] = merged
@@ -918,6 +941,110 @@ def task_ocr(crop, roi):
         return txt.strip(), conf, dbg
 
     return "", 0.0, dbg
+
+
+# --------------------------------------------------------------------------
+# task 2b : licence plate  =  ROI -> OCR, with the plate alphabet enforced
+# --------------------------------------------------------------------------
+
+PLATE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+# Characters OCR confuses when it cannot tell a letter slot from a digit slot.
+# Only tried when the ROI carries a "pattern", so a swap is either confirmed by
+# the plate format or not made at all.
+PLATE_SWAPS = {"O": "0", "D": "0", "Q": "0", "I": "1", "L": "1", "Z": "2",
+               "S": "5", "B": "8", "G": "6",
+               "0": "O", "1": "I", "2": "Z", "5": "S", "8": "B", "6": "G"}
+
+
+def plate_prep(crop, p):
+    """Make a plate legible to OCR: upscale, even out the light, binarise.
+
+    A plate in a traffic or gate camera is usually 20-40 px tall, which is well
+    under what Tesseract needs. Upscaling first and equalising afterwards does
+    far more for the reading than any parameter tuning later.
+    """
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    target = int(p.get("plate_height", 96) or 0)
+    if target > 0 and gray.shape[0] > 0 and gray.shape[0] < target:
+        f = float(target) / gray.shape[0]
+        gray = cv2.resize(gray, (max(1, int(gray.shape[1] * f)), target),
+                          interpolation=cv2.INTER_CUBIC)
+    if p.get("denoise", True):
+        gray = cv2.bilateralFilter(gray, 5, 40, 40)
+    if p.get("clahe", True):
+        gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    if not p.get("preprocess", True):
+        return gray
+    mode = p.get("threshold_mode", "otsu")
+    if mode == "adaptive":
+        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY, 25, 9)
+    else:
+        _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Tesseract wants dark characters on a light plate. Decide which way round
+    # this image is from the border, which is background on every plate.
+    border = np.concatenate([bw[0, :], bw[-1, :], bw[:, 0], bw[:, -1]])
+    if float(np.mean(border)) < 127:
+        bw = 255 - bw
+    if p.get("invert"):
+        bw = 255 - bw
+    return bw
+
+
+def plate_clean(text, p):
+    """Keep only plate characters, then check the result against the format.
+
+    Returns (plate, reason). An empty plate with a reason is the honest answer
+    when the frame does not contain something that looks like a plate: a wrong
+    plate number in a gate log is worse than no plate number.
+    """
+    keep = set(p.get("whitelist") or PLATE_CHARS)
+    raw = (text or "").upper()
+    if p.get("keep_spaces"):
+        keep.add(" ")
+    s = "".join(ch for ch in raw if ch in keep)
+    s = " ".join(s.split())
+    lo, hi = int(p.get("min_chars", 4)), int(p.get("max_chars", 12))
+    if len(s.replace(" ", "")) < lo:
+        return "", "too few characters"
+    if len(s.replace(" ", "")) > hi:
+        return "", "too many characters"
+
+    pattern = p.get("pattern") or ""
+    if not pattern:
+        return s, ""
+    import re
+    try:
+        rx = re.compile(pattern)
+    except re.error:
+        return s, ""                       # a broken pattern must not block the read
+    if rx.match(s):
+        return s, ""
+    # one confusable character at a time, accepted only if the format then fits
+    for i, ch in enumerate(s):
+        alt = PLATE_SWAPS.get(ch)
+        if not alt:
+            continue
+        cand = s[:i] + alt + s[i + 1:]
+        if rx.match(cand):
+            return cand, ""
+    return "", "does not match the plate format"
+
+
+def task_plate(crop, roi):
+    p = roi.get("params") or {}
+    img = plate_prep(crop, p)
+    dbg = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    sub = dict(p)
+    sub.setdefault("psm", 7)               # one line of text, which a plate is
+    sub.setdefault("whitelist", PLATE_CHARS)
+    sub["preprocess"] = False              # already done, and better, above
+    text, conf, _ = task_ocr(img, {"params": sub})
+    plate, reason = plate_clean(text, p)
+    if not plate:
+        return "", 0.0, dbg
+    return plate, conf, dbg
 
 
 # --------------------------------------------------------------------------
@@ -1550,6 +1677,7 @@ TASKS = {
     "zone_count": task_zone_count,
     "digits_7seg": task_digits,
     "ocr_text": task_ocr,
+    "plate_ocr": task_plate,
     "yolo_detect": task_yolo_detect,
     "yolo_classify": task_yolo_classify,
     "barcode_qr": task_code,
@@ -1638,6 +1766,37 @@ class OutputBus:
         if wh.get("enabled") and wh.get("url") and changed:
             self._post(wh["url"], rec)
 
+    def publish_event(self, name, payload, echo=True):
+        """A thing that happened rather than a value that was read.
+
+        Used for a shift rollover: the closing numbers go out on their own
+        topic so a dashboard can file them against the shift that produced
+        them, instead of having to notice that a counter went back to zero.
+        """
+        rec = {"time": now_iso(), "project": self.project, "camera": self.cam_id,
+               "event": name}
+        rec.update(payload or {})
+        if echo:
+            print("[EVENT] %s  %s" % (name, json.dumps(payload or {}, ensure_ascii=False)),
+                  flush=True)
+        if self.jsonl:
+            self.jsonl.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            self.jsonl.flush()
+        if self.csv_writer:
+            self.csv_writer.writerow([rec["time"], self.cam_id, payload.get("roi", ""),
+                                      name, json.dumps(payload, ensure_ascii=False), ""])
+            self.csv_file.flush()
+        if self.mqtt:
+            topic = "%s/%s/event/%s" % (self.rt["mqtt"].get("topic_prefix", "tesr/vision"),
+                                        self.cam_id, name)
+            try:
+                self.mqtt.publish(topic, json.dumps(rec, ensure_ascii=False))
+            except Exception as exc:
+                log("MQTT publish failed: %s" % exc, "WARN")
+        wh = self.rt.get("webhook") or {}
+        if wh.get("enabled") and wh.get("url"):
+            self._post(wh["url"], rec)
+
     @staticmethod
     def _post(url, rec):
         import urllib.request  # stdlib only, no extra dependency
@@ -1661,6 +1820,41 @@ class OutputBus:
 
 # --------------------------------------------------------------------------
 # grouping: several single-digit ROIs -> one reading
+# --------------------------------------------------------------------------
+
+def counter_state_path(rt, cam_id):
+    p = ((rt.get("counter_reset") or {}).get("state_file") or "").strip()
+    return p.replace("{camera}", str(cam_id)) if p else ""
+
+
+def load_counter_state(path):
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception as exc:          # a corrupt file must not stop the line
+        log("counter state not readable (%s) - starting from zero" % exc, "WARN")
+        return {}
+
+
+def save_counter_state(path, counters):
+    """Write atomically: a power cut mid-write must not destroy the shift count."""
+    if not path or not counters:
+        return
+    data = {rid: c.state() for rid, c in counters.items()}
+    try:
+        ensure_dir(path)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as exc:
+        log("counter state not saved (%s)" % exc, "WARN")
+
+
+# --------------------------------------------------------------------------
+# grouping helpers
 # --------------------------------------------------------------------------
 
 def roi_center(rect):
@@ -1756,6 +1950,19 @@ TASK_COLOUR = {
 }
 
 
+def count_text(roi, v):
+    """A directional counter as something readable at a glance across a room."""
+    p = roi.get("params") or {}
+    a, b = p.get("label_in", "in"), p.get("label_out", "out")
+    bits = []
+    for k in (a, b):
+        if k in v:
+            bits.append("%s %s" % (k.upper(), v[k]))
+    if "net" in v:
+        bits.append("net %s" % v["net"])
+    return "  ".join(bits) or "-"
+
+
 def draw_mark(img, x, y, r):
     """Small TESR emblem: gold ring, dark core, red centre dot."""
     cv2.circle(img, (x, y), r, TESR_GOLD_DEEP, 1, cv2.LINE_AA)
@@ -1779,7 +1986,8 @@ def _panel(img, x, y, w, h, alpha=0.78):
     roi[:] = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, INK, np.uint8), alpha, 0)
 
 
-def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=None):
+def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=None,
+                 period=""):
     """Boxes carry only their reading; names and confidences live in the panel.
 
     With one ROI per digit the boxes sit shoulder to shoulder, so a name label
@@ -1832,12 +2040,15 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
 
         # the reading itself, inside the box so neighbours never collide
         s = "-" if val in (None, "") else str(val)
+        if isinstance(val, dict):
+            s = count_text(roi, val)      # report:"all" hands back the whole dict
         if shape == "line":
-            (tw, th), _ = cv2.getTextSize(s[:14], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cut = 34 if isinstance(val, dict) else 14
+            (tw, th), _ = cv2.getTextSize(s[:cut], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             tx = min(w - tw - 6, max(4, int(pts[:, 0].mean()) + 12))
             ty = max(th + 30, int(pts[:, 1].min()) + th + 6)
             _panel(frame, tx - 5, ty - th - 5, tw + 10, th + 10, 0.7)
-            _text(frame, s[:14], (tx, ty), 0.6, WHITE if readable else TESR_RED, 2)
+            _text(frame, s[:cut], (tx, ty), 0.6, WHITE if readable else TESR_RED, 2)
         elif len(s) <= 4 and bw > 16 and bh > 20:
             scale = max(0.5, min(1.6, bh / 45.0))
             (tw, th), _ = cv2.getTextSize(s, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
@@ -1861,12 +2072,12 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
     _text(frame, bar, (76, 18), 0.45, WHITE)
 
     if show_panel:
-        strip = results_strip(w, rois, results, groups or [])
+        strip = results_strip(w, rois, results, groups or [], period)
         frame = np.vstack([frame, strip])
     return frame
 
 
-def results_strip(width, rois, results, groups):
+def results_strip(width, rois, results, groups, period=""):
     """Every reading in one place, drawn on its own strip that is appended under
     the frame. Adding space is safer than drawing on top: with ten ROIs spread
     over the picture there is no free corner that is guaranteed to stay empty."""
@@ -1900,10 +2111,14 @@ def results_strip(width, rois, results, groups):
         val = res.get("value")
         readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
         s = "-" if val in (None, "") else str(val)
+        if isinstance(val, dict):
+            s = count_text(roi, val)
         _text(strip, "%2d" % (idx + 1), (x, yy), 0.36, TESR_GOLD_DEEP)
         _text(strip, roi["name"][:15], (x + 22, yy), 0.36, GREY)
-        _text(strip, s[:14], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
+        _text(strip, s[:22], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
         _text(strip, "%.2f" % res.get("conf", 0.0), (x + 165, yy), 0.32, GREY)
+    if period:
+        _text(strip, "period  " + str(period), (width - 240, 18), 0.4, TESR_GOLD_DEEP)
     return strip
 
 
@@ -1971,7 +2186,28 @@ def run(cfg, args):
             '"detector": {"path": "best.onnx", "class_names": [...]} to the camera', "WARN")
 
     tracker = LINE.Tracker(**(cam.get("tracker") or {})) if (needs_tracks and LINE) else None
-    ctx = {"scale": cam.get("scale"), "counters": {}, "tracks": {}, "dets": []}
+    reset_cfg = rt.get("counter_reset") or {}
+    ctx = {"scale": cam.get("scale"), "counters": {}, "tracks": {}, "dets": [],
+           "reset": reset_cfg}
+
+    # Counters are built up front rather than on the first crossing, so a saved
+    # shift can be restored before the first frame is read.
+    if LINE is not None:
+        for r in rois:
+            if r.get("task") == "line_count":
+                ctx["counters"][r["id"]] = LINE.LineCounter(r, reset_cfg)
+
+    state_path = counter_state_path(rt, cam.get("id", "cam"))
+    if ctx["counters"]:
+        any_counter = next(iter(ctx["counters"].values()))
+        log("counters : reset=%s  period=%s%s"
+            % (any_counter.clock.mode, any_counter.period or "-",
+               ("  state=" + state_path) if state_path else ""))
+        if state_path and not args.reset_counters:
+            saved = load_counter_state(state_path)
+            for rid, c in ctx["counters"].items():
+                if c.restore(saved.get(rid)):
+                    log("resumed  : %s = %s" % (c.roi["name"], c.value()))
 
     src = FrameSource(source, cam.get("width", 0), cam.get("height", 0))
     bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
@@ -1982,7 +2218,7 @@ def run(cfg, args):
     show_panel = not args.no_panel
     period = 1.0 / max(1.0, float(rt.get("loop_fps", 10)))
     frame_i, fps, t_prev = 0, 0.0, time.time()
-    last_summary, last_summary_at = None, 0.0
+    last_summary, last_summary_at, last_state_save = None, 0.0, time.time()
     every = float(args.every or 0)
 
     def summary_text():
@@ -2056,6 +2292,18 @@ def run(cfg, args):
                                                              datetime.now().strftime("%Y%m%d_%H%M%S")))
                         cv2.imwrite(fn_, frame)
 
+            # shift / daily rollover: publish the closing numbers before zeroing
+            for c in ctx["counters"].values():
+                closed = c.roll()
+                if closed is not None:
+                    bus.publish_event("period_end", closed, echo=(console != "none"))
+            if state_path and (time.time() - last_state_save) >= 5.0:
+                if any(c.dirty for c in ctx["counters"].values()):
+                    save_counter_state(state_path, ctx["counters"])
+                    for c in ctx["counters"].values():
+                        c.dirty = False
+                last_state_save = time.time()
+
             # a completed group reading is published as its own value
             for name, members in groups:
                 text, whole, gconf = group_value(members, results)
@@ -2076,8 +2324,9 @@ def run(cfg, args):
             fps = 0.9 * fps + 0.1 * (1.0 / dt) if dt > 0 else fps
 
             if show:
+                period = next(iter(ctx["counters"].values())).period if ctx["counters"] else ""
                 view = draw_overlay(frame.copy(), cam, results, fps, groups, show_panel,
-                                    ctx.get("tracks"))
+                                    ctx.get("tracks"), period)
                 cv2.imshow("TESR Vision Runner", view)
                 if args.test:
                     strip = debug_strip(debugs, view.shape[1])
@@ -2105,6 +2354,8 @@ def run(cfg, args):
             if sleep > 0:
                 time.sleep(sleep)
     finally:
+        if state_path:
+            save_counter_state(state_path, ctx["counters"])
         src.release()
         bus.close()
         cv2.destroyAllWindows()
@@ -2241,6 +2492,8 @@ def main():
                     help="join single-digit ROIs that sit on the same row into one reading")
     ap.add_argument("--no-panel", dest="no_panel", action="store_true",
                     help="hide the on-screen results panel")
+    ap.add_argument("--reset-counters", dest="reset_counters", action="store_true",
+                    help="start the shift counters at zero, ignoring the saved state file")
     ap.add_argument("--calibrate", help="tune params of one ROI with live sliders")
     ap.add_argument("--list", action="store_true", help="list cameras and ROIs, then exit")
     ap.add_argument("--selftest", action="store_true", help="verify the digit reader offline")
@@ -2302,6 +2555,8 @@ Kept dependency-free beyond OpenCV and numpy so it runs on a Raspberry Pi.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta
 
 import numpy as np
 
@@ -2791,11 +3046,104 @@ class Tracker:
 
 
 # --------------------------------------------------------------------------
+# when does the counting period start, and what is it called?
+# --------------------------------------------------------------------------
+
+def parse_hm(s):
+    """"06:30" -> 390 minutes past midnight. None when it cannot be read."""
+    try:
+        parts = str(s).strip().split(":")
+        hh = int(parts[0])
+        mm = int(parts[1]) if len(parts) > 1 else 0
+    except (ValueError, IndexError, TypeError):
+        return None
+    if not (0 <= hh < 24 and 0 <= mm < 60):
+        return None
+    return hh * 60 + mm
+
+
+class PeriodClock:
+    """Decides which counting period the clock is in.
+
+    modes
+      none      the counters run until the program stops
+      daily     rolls over once a day at "at"
+      shift     rolls over at each time listed in "shifts"
+      hourly    rolls over on the hour
+      minutes   rolls over every "minutes" minutes, measured from midnight
+
+    A shift starting at 22:00 and ending at 06:00 belongs to the day it STARTED
+    on, because that is how the handover sheet on the factory wall reads it.
+    """
+
+    def __init__(self, cfg=None):
+        cfg = cfg or {}
+        self.mode = str(cfg.get("mode") or "none").lower()
+        self.at = parse_hm(cfg.get("at", "00:00")) or 0
+        self.minutes = max(1, int(cfg.get("minutes") or 60))
+        self.shifts = []
+        for s in cfg.get("shifts") or []:
+            if isinstance(s, dict):
+                m, name = parse_hm(s.get("at")), str(s.get("name") or "")
+            else:
+                m, name = parse_hm(s), ""
+            if m is None:
+                continue
+            self.shifts.append((m, name or chr(ord("A") + len(self.shifts))))
+        self.shifts.sort()
+        if self.mode == "shift" and not self.shifts:
+            # shifts were asked for but none were given: a daily rollover is
+            # closer to what was meant than silently never resetting
+            self.mode = "daily"
+
+    def _boundaries(self):
+        if self.mode == "daily":
+            return [(self.at, "")]
+        if self.mode == "hourly":
+            return [(h * 60, "%02dh" % h) for h in range(24)]
+        if self.mode == "minutes":
+            return [(m, "") for m in range(0, 24 * 60, self.minutes)]
+        if self.mode == "shift":
+            return list(self.shifts)
+        return []
+
+    def boundary(self, now=None):
+        """(start datetime, label) of the period that contains `now`."""
+        bounds = self._boundaries()
+        if not bounds:
+            return None, ""
+        now = now or datetime.now()
+        mins = now.hour * 60 + now.minute
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        chosen = None
+        for m, nm in bounds:
+            if m <= mins:
+                chosen = (m, nm, midnight)
+        if chosen is None:                       # still inside yesterday's period
+            m, nm = bounds[-1]
+            chosen = (m, nm, midnight - timedelta(days=1))
+        m, nm, base = chosen
+        start = base + timedelta(minutes=m)
+        if self.mode == "minutes":
+            return start, start.strftime("%Y-%m-%d %H:%M")
+        label = start.strftime("%Y-%m-%d")
+        return start, (label + " " + nm).strip() if nm else label
+
+
+# --------------------------------------------------------------------------
 # task: counting across a line, with direction
 # --------------------------------------------------------------------------
 
 class LineCounter:
-    def __init__(self, roi):
+    """Counts tracks crossing a gate, separately in each direction.
+
+    Two sets of numbers are kept: the ones for the current period, which the
+    clock above resets at every shift or day boundary, and a running lifetime
+    total that is never reset. The shift figure is what the supervisor reads;
+    the lifetime figure is what makes a restart visible instead of silent.
+    """
+
+    def __init__(self, roi, reset=None):
         p = roi.get("params") or {}
         self.roi = roi
         self.name_in = p.get("label_in", "in")
@@ -2803,7 +3151,11 @@ class LineCounter:
         self.classes = p.get("classes") or []
         self.invert = bool(p.get("invert"))
         self.counts = {self.name_in: 0, self.name_out: 0}
+        self.lifetime = {self.name_in: 0, self.name_out: 0}
         self.seen = {}                    # track id -> last side
+        self.clock = PeriodClock(p.get("reset") or reset)
+        self.period_start, self.period = self.clock.boundary()
+        self.dirty = False                # something to save since the last write
 
     def update(self, tracks, w, h):
         a, b = denorm(self.roi["points"], w, h)
@@ -2829,14 +3181,82 @@ class LineCounter:
                 going_in = not going_in
             key = self.name_in if going_in else self.name_out
             self.counts[key] += 1
+            self.lifetime[key] += 1
+            self.dirty = True
             crossed.append((tid, key))
         for tid in [t for t in self.seen if t not in tracks]:
             del self.seen[tid]
         return crossed
 
+    def roll(self, now=None):
+        """Close the period if the clock has moved on.
+
+        Returns the closing record so it can be published and logged, or None
+        when the period has not changed. `seen` is deliberately left alone: a
+        track that is halfway across the gate at the boundary should still be
+        counted once, in the period it finishes crossing in.
+        """
+        if self.clock.mode == "none":
+            return None
+        now = now or datetime.now()
+        start, label = self.clock.boundary(now)
+        if label == self.period:
+            return None
+        rec = self.value()
+        rec["period"] = self.period
+        rec["period_start"] = self.period_start.isoformat(timespec="seconds") \
+            if self.period_start else ""
+        rec["period_end"] = now.isoformat(timespec="seconds")
+        rec["roi"] = self.roi.get("name", "")
+        self.counts = {self.name_in: 0, self.name_out: 0}
+        self.period_start, self.period = start, label
+        self.dirty = True
+        return rec
+
     def value(self):
         i, o = self.counts[self.name_in], self.counts[self.name_out]
-        return {self.name_in: i, self.name_out: o, "net": i - o, "total": i + o}
+        v = {self.name_in: i, self.name_out: o, "net": i - o, "total": i + o}
+        if self.clock.mode != "none":
+            # flat keys, because Node-RED and most dashboards read them directly
+            v["period"] = self.period
+            v["lifetime_" + self.name_in] = self.lifetime[self.name_in]
+            v["lifetime_" + self.name_out] = self.lifetime[self.name_out]
+        return v
+
+    # --- surviving a restart ------------------------------------------------
+
+    def state(self):
+        return {"period": self.period,
+                "period_start": self.period_start.isoformat(timespec="seconds")
+                                if self.period_start else "",
+                "counts": dict(self.counts),
+                "lifetime": dict(self.lifetime)}
+
+    def restore(self, st):
+        """Resume from a saved state.
+
+        The lifetime total always comes back. The period counts only come back
+        when the saved period is still the current one - restarting the Pi in
+        the middle of a shift must not lose the shift, and restarting it after
+        the shift changed must not carry the old shift's numbers forward.
+        """
+        if not isinstance(st, dict):
+            return False
+        for k, v in (st.get("lifetime") or {}).items():
+            if k in self.lifetime:
+                try:
+                    self.lifetime[k] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        if st.get("period") != self.period:
+            return False
+        for k, v in (st.get("counts") or {}).items():
+            if k in self.counts:
+                try:
+                    self.counts[k] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        return True
 
 
 # --------------------------------------------------------------------------
@@ -2974,6 +3394,7 @@ th: {
   detectorTitle:"โมเดลตรวจจับของกล้องนี้",
   detectorHint:"ใช้ร่วมกันทุกเส้นนับและทุกพื้นที่ รันครั้งเดียวต่อเฟรม",
   task_digits_7seg:"อ่านตัวเลข 7-segment / LCD", task_ocr_text:"OCR ข้อความ",
+  task_plate_ocr:"อ่านป้ายทะเบียน (ROI → OCR)",
   task_yolo_detect:"YOLO ตรวจจับวัตถุ", task_yolo_classify:"YOLO จำแนกภาพ",
   task_barcode_qr:"Barcode / QR", task_presence_diff:"ตรวจการเปลี่ยนแปลง / มีของ",
   task_color_check:"ตรวจสี (ไฟสถานะ)",
@@ -3042,6 +3463,14 @@ th: {
   unreadSome:"อ่านไม่ออกบางหลัก · ", conf:"conf ",
   hint_digits_7seg:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า กดปุ่มนี้เพื่ออ่านซ้ำได้",
   hint_ocr_text:"ใช้เอนจิน Tesseract ครั้งแรกต้องต่อเน็ตเพื่อโหลด อาจใช้เวลาสักครู่",
+  hint_plate_ocr:"ตีกรอบให้คลุม<b>เฉพาะแถวตัวอักษรและเลขทะเบียน</b> ไม่ต้องเอาชื่อจังหวัด แล้วกดอ่าน",
+  plateBrowserNote:"อ่านในเบราว์เซอร์ — ค่าจริงให้ยืนยันด้วย Python บนเครื่องปลายทาง",
+  plateRejected:"ไม่รายงานค่า: ", plateTooFew:"ตัวอักษรน้อยเกินไป",
+  plateTooMany:"ตัวอักษรมากเกินไป", plateNoMatch:"ไม่ตรงรูปแบบป้ายที่ตั้งไว้",
+  pPattern:"รูปแบบป้าย (regex)", pMinChars:"ตัวอักษรน้อยสุด", pMaxChars:"ตัวอักษรมากสุด",
+  pPlateH:"ขยายให้สูง (px)", pClahe:"ปรับแสงให้สม่ำเสมอ", pDenoise:"ลด noise",
+  plateHint:"<b>รูปแบบป้าย</b> คือตัวกันอ่านผิด ถ้าอ่านได้แล้วไม่ตรงรูปแบบ จะไม่รายงานค่าออกมาเลย ดีกว่าได้เลขทะเบียนผิดไปบันทึกไว้<br>ตัวอย่าง <code>^[A-Z]{2}[0-9]{4}$</code> = ตัวอักษร 2 ตัว ตามด้วยเลข 4 ตัว · เว้นว่างไว้ = ไม่ตรวจรูปแบบ",
+  platePreTh:"ป้ายทะเบียนไทยมีตัวอักษรไทย ต้องใช้ easyocr หรือ Tesseract ที่ลงภาษาไทย (<code>tha</code>) บนเครื่องปลายทาง และใส่ตัวอักษรไทยลงในช่องตัวอักษรที่ยอมให้อ่าน ส่วนในเบราว์เซอร์นี้ทดลองได้เฉพาะ A-Z 0-9",
   hint_yolo_detect:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
   hint_yolo_classify:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
   hint_barcode_qr:"อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
@@ -3074,6 +3503,12 @@ th: {
   rtFps:"Loop FPS สูงสุด", rtShow:"แสดงหน้าต่างภาพ", rtShowYes:"แสดง", rtShowNo:"ไม่แสดง (headless)",
   rtCsv:"บันทึก CSV", rtJsonl:"บันทึก JSONL", rtSave:"เก็บภาพเมื่อค่าเปลี่ยน",
   rtSaveNo:"ไม่เก็บ", rtSaveYes:"เก็บ", rtSaveDir:"โฟลเดอร์เก็บภาพ",
+  rtReset:"รีเซ็ตตัวนับ", rtResetNone:"ไม่รีเซ็ต (นับไปจนปิดโปรแกรม)",
+  rtResetDaily:"รายวัน", rtResetShift:"ตามกะ", rtResetHourly:"รายชั่วโมง",
+  rtResetMin:"ทุก N นาที",
+  rtResetAt:"รีเซ็ตเวลา (รายวัน)", rtShifts:"เวลาเริ่มกะ (คั่นด้วยจุลภาค)",
+  rtResetMins:"ทุกกี่นาที", rtStateFile:"ไฟล์เก็บยอดนับ (กันไฟดับ)",
+  rtResetNote:'เมื่อถึงเวลารีเซ็ต ตัวนับจะส่งยอดปิดกะออกทาง MQTT หัวข้อ <code>&lt;prefix&gt;/&lt;camera&gt;/event/period_end</code> ก่อน แล้วจึงเริ่มนับใหม่จากศูนย์ · ยอดรวมตั้งแต่เริ่มติดตั้งจะส่งมาด้วยทุกครั้งในชื่อ <code>lifetime_in</code> / <code>lifetime_out</code> จึงเห็นได้ว่ามีการรีสตาร์ตเกิดขึ้น<br>ถ้าใส่ไฟล์เก็บยอดนับ ไฟดับแล้วเปิดใหม่กลางกะจะนับต่อจากเดิม ถ้าเปิดใหม่ข้ามกะจะเริ่มกะใหม่ที่ศูนย์',
   rtNote:'ค่าเหล่านี้ถูกเขียนลงใน config.json และอ่านโดย tesr_vision_runner.py สั่งงานตอนรันทับได้ด้วย <span class="kbd">--headless</span> <span class="kbd">--test</span>',
 
   /* toasts */
@@ -3186,6 +3621,7 @@ en: {
   detectorTitle:"Detector for this camera",
   detectorHint:"Shared by every counting line and zone. Runs once per frame.",
   task_digits_7seg:"Read 7-segment / LCD digits", task_ocr_text:"OCR text",
+  task_plate_ocr:"Read licence plate (ROI → OCR)",
   task_yolo_detect:"YOLO object detection", task_yolo_classify:"YOLO classification",
   task_barcode_qr:"Barcode / QR", task_presence_diff:"Change / presence detection",
   task_color_check:"Colour check (status lamp)",
@@ -3251,6 +3687,14 @@ en: {
   unreadSome:"some digits unreadable · ", conf:"conf ",
   hint_digits_7seg:"Re-reads instantly whenever you change a value. Press to read again.",
   hint_ocr_text:"Uses the Tesseract engine. The first run needs internet and may take a moment.",
+  hint_plate_ocr:"Draw the box around <b>the registration row only</b> - leave the province or state name out - then read.",
+  plateBrowserNote:"Read in the browser — confirm the real value with Python on the device",
+  plateRejected:"withheld: ", plateTooFew:"too few characters",
+  plateTooMany:"too many characters", plateNoMatch:"does not match the plate format",
+  pPattern:"Plate format (regex)", pMinChars:"Min characters", pMaxChars:"Max characters",
+  pPlateH:"Upscale to height (px)", pClahe:"Even out the light", pDenoise:"Reduce noise",
+  plateHint:"<b>Plate format</b> is the safety net. A reading that does not match it is withheld rather than reported, because a wrong plate number in a gate log is worse than no plate number.<br>Example <code>^[A-Z]{2}[0-9]{4}$</code> = two letters then four digits · leave it empty to skip the check",
+  platePreTh:"Plates with non-Latin characters (Thai, Arabic, Cyrillic) need easyocr, or Tesseract with that language pack installed on the target device, plus those characters in the allowed list. This browser preview can only try A-Z 0-9.",
   hint_yolo_detect:"Runs the selected .onnx model on this ROI",
   hint_yolo_classify:"Runs the selected .onnx model on this ROI",
   hint_barcode_qr:"Built-in QR and barcode reading. Works offline, in every browser.",
@@ -3281,6 +3725,12 @@ en: {
   rtFps:"Max loop FPS", rtShow:"Show the video window", rtShowYes:"Show", rtShowNo:"Hide (headless)",
   rtCsv:"Write CSV", rtJsonl:"Write JSONL", rtSave:"Save an image when the value changes",
   rtSaveNo:"Don't save", rtSaveYes:"Save", rtSaveDir:"Image folder",
+  rtReset:"Reset counters", rtResetNone:"Never (count until the program stops)",
+  rtResetDaily:"Daily", rtResetShift:"Per shift", rtResetHourly:"Hourly",
+  rtResetMin:"Every N minutes",
+  rtResetAt:"Reset at (daily)", rtShifts:"Shift start times (comma separated)",
+  rtResetMins:"Every how many minutes", rtStateFile:"Counter state file (survives a reboot)",
+  rtResetNote:'At each boundary the counter publishes its closing numbers to MQTT topic <code>&lt;prefix&gt;/&lt;camera&gt;/event/period_end</code> and then starts again from zero · a running total since installation goes out with every reading as <code>lifetime_in</code> / <code>lifetime_out</code>, so a restart is visible instead of silent<br>With a state file, a power cut mid-shift resumes the shift; restarting after the shift changed starts the new shift at zero.',
   rtNote:'These go into config.json and are read by tesr_vision_runner.py. You can override them at run time with <span class="kbd">--headless</span> <span class="kbd">--test</span>',
 
   imgLoaded:"Reference image loaded ", imgFailed:"Could not load that image",
@@ -3375,6 +3825,7 @@ const TASKS = {
   zone_count:   {color:"#8CD28C", model:"detector", shape:"polygon"},
   digits_7seg:  {color:"#E6CC81", model:false},
   ocr_text:     {color:"#D9A441", model:false},
+  plate_ocr:    {color:"#F2A3A0", model:false},
   yolo_detect:  {color:"#F30006", model:true},
   yolo_classify:{color:"#FF7A6B", model:true},
   barcode_qr:   {color:"#7FD3E0", model:false},
@@ -3403,6 +3854,11 @@ function defaultParams(task){
     case "digits_7seg":  return {threshold_mode:"otsu", threshold:128, invert:false, blur:3,
                                  min_fill:0.5, split:"auto", digits:1, decimals:0, unit:"", as_number:true};
     case "ocr_text":     return {engine:"tesseract", lang:"eng", psm:7, whitelist:"", preprocess:true, invert:false};
+    case "plate_ocr":    return {engine:"tesseract", lang:"eng", psm:7,
+                                 whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+                                 pattern:"", min_chars:4, max_chars:12,
+                                 plate_height:96, clahe:true, denoise:true,
+                                 preprocess:true, invert:false};
     case "yolo_detect":  return {output:"count"};
     case "yolo_classify":return {};
     case "barcode_qr":   return {qr:true, barcode:true};
@@ -3423,7 +3879,8 @@ const state = {
   runtime: {loop_fps:10, show_window:true, print_console:true, jsonl_log:"logs/results.jsonl",
             csv_log:"logs/results.csv", save_on_change:false, save_dir:"captures",
             mqtt:{enabled:false, host:"localhost", port:1883, topic_prefix:"tesr/vision", username:"", password:""},
-            webhook:{enabled:false, url:""}},
+            webhook:{enabled:false, url:""},
+            counter_reset:{mode:"none", at:"00:00", shifts:[], minutes:60, state_file:""}},
   cameras: [],
   ci: 0,            // active camera index
   sel: null,        // selected roi id
@@ -3931,7 +4388,7 @@ function addRoi(x, y, w, h){
                shape: taskShape(task),
                rect:{x:+x.toFixed(4), y:+y.toFixed(4), w:+w.toFixed(4), h:+h.toFixed(4), angle:0},
                output_key: task.split("_")[0] + "_" + n, stable_frames: 2, every_n_frames: 1,
-               upscale_to: task === "digits_7seg" ? 160 : 0,
+               upscale_to: task === "digits_7seg" ? 160 : (task === "plate_ocr" ? 200 : 0),
                params: defaultParams(task)};
   const m = defaultModel(task); if(m) roi.model = m;
   if(roi.shape !== "rect"){
@@ -4158,6 +4615,21 @@ function renderTaskParams(r){
                field(t("pWhitelist"), txt(p,"whitelist"))]));
     add(rowOf([field(t("pPreprocess"), sel(p,"preprocess",[[true,t("enabled")],[false,t("disabled")]])),
                field(t("pInvert"), sel(p,"invert",[[false,t("no")],[true,t("yes")]]))]));
+  } else if(r.task === "plate_ocr"){
+    add(rowOf([field(t("pEngine"), sel(p,"engine",[["tesseract","pytesseract"],["easyocr","easyocr"]])),
+               field(t("pLang"), txt(p,"lang"))]));
+    add(rowOf([field(t("pWhitelist"), txt(p,"whitelist"))]));
+    add(rowOf([field(t("pPattern"), txt(p,"pattern"))]));
+    const ph = document.createElement("div");
+    ph.className = "hint"; ph.innerHTML = t("plateHint"); add(ph);
+    add(rowOf([field(t("pMinChars"), num(p,"min_chars",{min:1,step:1})),
+               field(t("pMaxChars"), num(p,"max_chars",{min:1,step:1})),
+               field(t("pPlateH"), num(p,"plate_height",{min:0,step:8}))]));
+    add(rowOf([field(t("pClahe"), sel(p,"clahe",[[true,t("enabled")],[false,t("disabled")]])),
+               field(t("pDenoise"), sel(p,"denoise",[[true,t("enabled")],[false,t("disabled")]])),
+               field(t("pInvert"), sel(p,"invert",[[false,t("no")],[true,t("yes")]]))]));
+    const pl = document.createElement("div");
+    pl.className = "hint"; pl.innerHTML = t("platePreTh"); add(pl);
   } else if(r.task === "yolo_detect" || r.task === "yolo_classify"){
     r.model = r.model || defaultModel(r.task);
     const wantType = r.task === "yolo_detect" ? "detect" : "classify";
@@ -5523,6 +5995,95 @@ async function getTessWorker(lang){
   tessLang = lang;
   return tessWorker;
 }
+/* ---- licence plate -------------------------------------------------------
+   The browser stand-in for task_plate in the runner. The steps are the same -
+   upscale, even out the light, binarise with the polarity taken from the
+   border, OCR, then enforce the plate alphabet and format - but CLAHE and the
+   bilateral filter are approximated here, so a reading in this preview is a
+   tuning aid. The number that counts is the one the Python runner reports on
+   the device. */
+const PLATE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const PLATE_SWAPS = {O:"0", D:"0", Q:"0", I:"1", L:"1", Z:"2", S:"5", B:"8", G:"6",
+                     "0":"O", "1":"I", "2":"Z", "5":"S", "8":"B", "6":"G"};
+
+/* contrast stretch between the 2nd and 98th percentile: a global stand-in for
+   CLAHE, which is enough to rescue a flat, hazy plate crop */
+function stretchGray(g){
+  const hist = new Int32Array(256);
+  for(let i = 0; i < g.length; i++) hist[g[i]]++;
+  const lowN = g.length * 0.02, highN = g.length * 0.98;
+  let acc = 0, lo = 0, hi = 255;
+  for(let v = 0; v < 256; v++){ acc += hist[v]; if(acc >= lowN){ lo = v; break; } }
+  acc = 0;
+  for(let v = 0; v < 256; v++){ acc += hist[v]; if(acc >= highN){ hi = v; break; } }
+  if(hi - lo < 8) return g;
+  const out = new Uint8ClampedArray(g.length), k = 255 / (hi - lo);
+  for(let i = 0; i < g.length; i++) out[i] = Math.max(0, Math.min(255, (g[i] - lo) * k));
+  return out;
+}
+
+function platePrep(crop, p){
+  let src = crop, w = crop.width, h = crop.height;
+  const target = +p.plate_height || 0;
+  if(target > 0 && h > 0 && h < target){
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w * target / h)); c.height = target;
+    const g = c.getContext("2d");
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+    g.drawImage(crop, 0, 0, c.width, c.height);
+    src = c; w = c.width; h = c.height;
+  }
+  let gray = grayOf(src);
+  if(p.denoise !== false) gray = boxBlur(gray, w, h, 3);
+  if(p.clahe !== false)   gray = stretchGray(gray);
+
+  let bw;
+  if(p.preprocess === false){
+    bw = gray;
+  } else {
+    bw = binarizeJS(gray, w, h, {threshold_mode: p.threshold_mode || "otsu", blur: 1});
+    // the border of a plate crop is background, so it says which way round this is
+    let sum = 0, n = 0;
+    for(let x = 0; x < w; x++){ sum += bw[x] + bw[(h-1)*w + x]; n += 2; }
+    for(let y = 0; y < h; y++){ sum += bw[y*w] + bw[y*w + w - 1]; n += 2; }
+    if(sum / Math.max(1, n) < 127) for(let i = 0; i < bw.length; i++) bw[i] = 255 - bw[i];
+    if(p.invert) for(let i = 0; i < bw.length; i++) bw[i] = 255 - bw[i];
+  }
+
+  const out = document.createElement("canvas");
+  out.width = w; out.height = h;
+  const g2 = out.getContext("2d"), id = g2.createImageData(w, h);
+  for(let i = 0; i < bw.length; i++){
+    id.data[i*4] = id.data[i*4+1] = id.data[i*4+2] = bw[i];
+    id.data[i*4+3] = 255;
+  }
+  g2.putImageData(id, 0, 0);
+  return out;
+}
+
+function plateClean(text, p){
+  const keep = new Set((p.whitelist || PLATE_CHARS).split(""));
+  if(p.keep_spaces) keep.add(" ");
+  let s = (text || "").toUpperCase().split("").filter(ch => keep.has(ch)).join("");
+  s = s.split(/\s+/).filter(Boolean).join(" ");
+  const bare = s.replace(/ /g, "");
+  const lo = +p.min_chars || 4, hi = +p.max_chars || 12;
+  if(bare.length < lo) return {plate:"", reason:t("plateTooFew")};
+  if(bare.length > hi) return {plate:"", reason:t("plateTooMany")};
+  if(!p.pattern) return {plate:s, reason:""};
+  let rx;
+  try{ rx = new RegExp(p.pattern); }
+  catch(e){ return {plate:s, reason:""}; }     // a broken pattern must not block it
+  if(rx.test(s)) return {plate:s, reason:""};
+  for(let i = 0; i < s.length; i++){
+    const alt = PLATE_SWAPS[s[i]];
+    if(!alt) continue;
+    const cand = s.slice(0, i) + alt + s.slice(i + 1);
+    if(rx.test(cand)) return {plate:cand, reason:""};
+  }
+  return {plate:"", reason:t("plateNoMatch")};
+}
+
 async function runOcr(canvas, params){
   const worker = await getTessWorker((params.lang || "eng").split("+")[0]);
   const opts = {};
@@ -5819,6 +6380,20 @@ async function evalRoi(roi){
     if(r.value === null || r.value === undefined)
       return {value:null, conf:0, crop, line:r, note:lineReason(r)};
     return {value: r.value + (r.unit ? " " + r.unit : ""), conf: r.conf || 0, crop, line:r};
+  }
+  if(roi.task === "plate_ocr"){
+    const img = platePrep(crop, roi.params);
+    try{
+      const sub = Object.assign({}, roi.params);
+      if(!sub.whitelist) sub.whitelist = PLATE_CHARS;
+      if(sub.psm === undefined || sub.psm === "") sub.psm = 7;
+      const r = await runOcr(img, sub);
+      const cleaned = plateClean(r.text, roi.params);
+      return {value: cleaned.plate, conf: cleaned.plate ? r.conf : 0, crop: img,
+              note: cleaned.plate ? t("plateBrowserNote")
+                                  : (r.text ? t("plateRejected") + cleaned.reason
+                                            : t("ocrNothing"))};
+    }catch(e){ return {value:"", conf:0, crop: img, note: e.message}; }
   }
   if(roi.task === "ocr_text"){
     let img = crop;
@@ -6569,7 +7144,25 @@ function syncRuntimeUi(){
   P("rtMqtt").value = rt.mqtt.enabled ? "1" : "0"; P("rtHost").value = rt.mqtt.host;
   P("rtPort").value = rt.mqtt.port; P("rtTopic").value = rt.mqtt.topic_prefix;
   P("rtWh").value = rt.webhook.enabled ? "1" : "0"; P("rtWhUrl").value = rt.webhook.url || "";
+  const cr = rt.counter_reset = rt.counter_reset ||
+    {mode:"none", at:"00:00", shifts:[], minutes:60, state_file:""};
+  P("rtReset").value = cr.mode || "none";
+  P("rtShifts").value = (cr.shifts || []).map(x => (x && x.at) ? x.at : x).join(", ");
+  P("rtResetAt").value = cr.at || "00:00";
+  P("rtResetMins").value = cr.minutes || 60;
+  P("rtStateFile").value = cr.state_file || "";
+  syncResetUi();
 }
+/* only show the field that the chosen mode actually uses */
+function syncResetUi(){
+  const m = P("rtReset").value;
+  const show = (id, on) => { const e = P(id).parentElement; e.style.display = on ? "" : "none"; };
+  show("rtShifts", m === "shift");
+  show("rtResetAt", m === "daily");
+  show("rtResetMins", m === "minutes");
+  show("rtStateFile", m !== "none");
+}
+P("rtReset").onchange = syncResetUi;
 P("btnRuntime").onclick = () => { syncRuntimeUi(); P("dlgRt").showModal(); };
 P("rtClose").onclick = () => {
   const rt = state.runtime;
@@ -6579,6 +7172,12 @@ P("rtClose").onclick = () => {
   rt.mqtt.enabled = P("rtMqtt").value === "1"; rt.mqtt.host = P("rtHost").value.trim();
   rt.mqtt.port = +P("rtPort").value || 1883; rt.mqtt.topic_prefix = P("rtTopic").value.trim() || "tesr/vision";
   rt.webhook.enabled = P("rtWh").value === "1"; rt.webhook.url = P("rtWhUrl").value.trim();
+  const cr = rt.counter_reset;
+  cr.mode = P("rtReset").value;
+  cr.shifts = P("rtShifts").value.split(/[,;]/).map(x => x.trim()).filter(Boolean);
+  cr.at = P("rtResetAt").value.trim() || "00:00";
+  cr.minutes = Math.max(1, +P("rtResetMins").value || 60);
+  cr.state_file = P("rtStateFile").value.trim();
   P("dlgRt").close();
 };
 

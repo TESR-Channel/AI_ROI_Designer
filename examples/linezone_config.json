@@ -5,7 +5,22 @@
     "loop_fps": 30,
     "show_window": false,
     "print_console": true,
-    "console": "summary"
+    "console": "summary",
+    "counter_reset": {
+      "mode": "shift",
+      "shifts": [
+        "06:00",
+        "14:00",
+        "22:00"
+      ],
+      "state_file": "logs/counters_{camera}.json"
+    },
+    "mqtt": {
+      "enabled": false,
+      "host": "localhost",
+      "port": 1883,
+      "topic_prefix": "tesr/vision"
+    }
   },
   "cameras": [
     {
@@ -143,5 +158,5 @@
       ]
     }
   ],
-  "_note": "Shapes and parameters for the four line/zone tasks. Point 'source' at your own camera or video, and set 'detector' to your .onnx model before the counting tasks will work."
+  "_note": "Shapes and parameters for the four line/zone tasks. Point 'source' at your own camera or video, and set 'detector' to your .onnx model before the counting tasks will work. counter_reset zeroes the gate counters at each shift boundary and publishes the closing numbers as a period_end event; state_file keeps the shift across a reboot."
 }

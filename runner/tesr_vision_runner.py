@@ -4,7 +4,7 @@
 TESR Edge AI Vision Runner
 ==========================
 Thai Embedded Systems and Robotics — Build, Train and Deploy AI to Edge Devices
-Runs the ROI configuration exported from TESR ROI Studio (roi_designer.html).
+Runs the ROI configuration exported from TESR ROI Studio (index.html).
 
 One config file -> many cameras -> many ROIs -> one task per ROI.
 Runs on Windows / macOS / Linux / Raspberry Pi / NVIDIA Jetson with the same code.
@@ -20,6 +20,7 @@ Usage
     python tesr_vision_runner.py --config config.json --source rtsp://... --test
     python tesr_vision_runner.py --config config.json --image sample.jpg --once
     python tesr_vision_runner.py --config config.json --calibrate roi_1
+    python tesr_vision_runner.py --config config.json --headless --reset-counters
     python tesr_vision_runner.py --config config.json --selftest
 
 Author: TESR Co., Ltd. - Thai Embedded Systems and Robotics
@@ -48,7 +49,7 @@ except ImportError:  # pragma: no cover
     )
     raise
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 SCHEMA = "tesr.roi.v1"
 
 # The line and zone engine lives in its own module so it can be tested on its
@@ -101,6 +102,12 @@ DEFAULT_RUNTIME = {
     "mqtt": {"enabled": False, "host": "localhost", "port": 1883,
              "topic_prefix": "tesr/vision", "username": "", "password": ""},
     "webhook": {"enabled": False, "url": ""},
+    # When the directional counters go back to zero. "shift" uses the times in
+    # "shifts"; see PeriodClock in tesr_line_engine.py for the other modes.
+    # state_file keeps the counts across a reboot, which matters on a Pi that
+    # loses power more often than it finishes a shift.
+    "counter_reset": {"mode": "none", "at": "00:00", "shifts": [],
+                      "minutes": 60, "state_file": ""},
 }
 
 
@@ -112,7 +119,7 @@ def load_config(path):
             % (cfg.get("schema"), SCHEMA), "WARN")
     rt = dict(DEFAULT_RUNTIME)
     rt.update(cfg.get("runtime") or {})
-    for key in ("mqtt", "webhook"):
+    for key in ("mqtt", "webhook", "counter_reset"):
         merged = dict(DEFAULT_RUNTIME[key])
         merged.update(rt.get(key) or {})
         rt[key] = merged
@@ -456,6 +463,110 @@ def task_ocr(crop, roi):
         return txt.strip(), conf, dbg
 
     return "", 0.0, dbg
+
+
+# --------------------------------------------------------------------------
+# task 2b : licence plate  =  ROI -> OCR, with the plate alphabet enforced
+# --------------------------------------------------------------------------
+
+PLATE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+# Characters OCR confuses when it cannot tell a letter slot from a digit slot.
+# Only tried when the ROI carries a "pattern", so a swap is either confirmed by
+# the plate format or not made at all.
+PLATE_SWAPS = {"O": "0", "D": "0", "Q": "0", "I": "1", "L": "1", "Z": "2",
+               "S": "5", "B": "8", "G": "6",
+               "0": "O", "1": "I", "2": "Z", "5": "S", "8": "B", "6": "G"}
+
+
+def plate_prep(crop, p):
+    """Make a plate legible to OCR: upscale, even out the light, binarise.
+
+    A plate in a traffic or gate camera is usually 20-40 px tall, which is well
+    under what Tesseract needs. Upscaling first and equalising afterwards does
+    far more for the reading than any parameter tuning later.
+    """
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    target = int(p.get("plate_height", 96) or 0)
+    if target > 0 and gray.shape[0] > 0 and gray.shape[0] < target:
+        f = float(target) / gray.shape[0]
+        gray = cv2.resize(gray, (max(1, int(gray.shape[1] * f)), target),
+                          interpolation=cv2.INTER_CUBIC)
+    if p.get("denoise", True):
+        gray = cv2.bilateralFilter(gray, 5, 40, 40)
+    if p.get("clahe", True):
+        gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    if not p.get("preprocess", True):
+        return gray
+    mode = p.get("threshold_mode", "otsu")
+    if mode == "adaptive":
+        bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY, 25, 9)
+    else:
+        _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Tesseract wants dark characters on a light plate. Decide which way round
+    # this image is from the border, which is background on every plate.
+    border = np.concatenate([bw[0, :], bw[-1, :], bw[:, 0], bw[:, -1]])
+    if float(np.mean(border)) < 127:
+        bw = 255 - bw
+    if p.get("invert"):
+        bw = 255 - bw
+    return bw
+
+
+def plate_clean(text, p):
+    """Keep only plate characters, then check the result against the format.
+
+    Returns (plate, reason). An empty plate with a reason is the honest answer
+    when the frame does not contain something that looks like a plate: a wrong
+    plate number in a gate log is worse than no plate number.
+    """
+    keep = set(p.get("whitelist") or PLATE_CHARS)
+    raw = (text or "").upper()
+    if p.get("keep_spaces"):
+        keep.add(" ")
+    s = "".join(ch for ch in raw if ch in keep)
+    s = " ".join(s.split())
+    lo, hi = int(p.get("min_chars", 4)), int(p.get("max_chars", 12))
+    if len(s.replace(" ", "")) < lo:
+        return "", "too few characters"
+    if len(s.replace(" ", "")) > hi:
+        return "", "too many characters"
+
+    pattern = p.get("pattern") or ""
+    if not pattern:
+        return s, ""
+    import re
+    try:
+        rx = re.compile(pattern)
+    except re.error:
+        return s, ""                       # a broken pattern must not block the read
+    if rx.match(s):
+        return s, ""
+    # one confusable character at a time, accepted only if the format then fits
+    for i, ch in enumerate(s):
+        alt = PLATE_SWAPS.get(ch)
+        if not alt:
+            continue
+        cand = s[:i] + alt + s[i + 1:]
+        if rx.match(cand):
+            return cand, ""
+    return "", "does not match the plate format"
+
+
+def task_plate(crop, roi):
+    p = roi.get("params") or {}
+    img = plate_prep(crop, p)
+    dbg = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    sub = dict(p)
+    sub.setdefault("psm", 7)               # one line of text, which a plate is
+    sub.setdefault("whitelist", PLATE_CHARS)
+    sub["preprocess"] = False              # already done, and better, above
+    text, conf, _ = task_ocr(img, {"params": sub})
+    plate, reason = plate_clean(text, p)
+    if not plate:
+        return "", 0.0, dbg
+    return plate, conf, dbg
 
 
 # --------------------------------------------------------------------------
@@ -1088,6 +1199,7 @@ TASKS = {
     "zone_count": task_zone_count,
     "digits_7seg": task_digits,
     "ocr_text": task_ocr,
+    "plate_ocr": task_plate,
     "yolo_detect": task_yolo_detect,
     "yolo_classify": task_yolo_classify,
     "barcode_qr": task_code,
@@ -1176,6 +1288,37 @@ class OutputBus:
         if wh.get("enabled") and wh.get("url") and changed:
             self._post(wh["url"], rec)
 
+    def publish_event(self, name, payload, echo=True):
+        """A thing that happened rather than a value that was read.
+
+        Used for a shift rollover: the closing numbers go out on their own
+        topic so a dashboard can file them against the shift that produced
+        them, instead of having to notice that a counter went back to zero.
+        """
+        rec = {"time": now_iso(), "project": self.project, "camera": self.cam_id,
+               "event": name}
+        rec.update(payload or {})
+        if echo:
+            print("[EVENT] %s  %s" % (name, json.dumps(payload or {}, ensure_ascii=False)),
+                  flush=True)
+        if self.jsonl:
+            self.jsonl.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            self.jsonl.flush()
+        if self.csv_writer:
+            self.csv_writer.writerow([rec["time"], self.cam_id, payload.get("roi", ""),
+                                      name, json.dumps(payload, ensure_ascii=False), ""])
+            self.csv_file.flush()
+        if self.mqtt:
+            topic = "%s/%s/event/%s" % (self.rt["mqtt"].get("topic_prefix", "tesr/vision"),
+                                        self.cam_id, name)
+            try:
+                self.mqtt.publish(topic, json.dumps(rec, ensure_ascii=False))
+            except Exception as exc:
+                log("MQTT publish failed: %s" % exc, "WARN")
+        wh = self.rt.get("webhook") or {}
+        if wh.get("enabled") and wh.get("url"):
+            self._post(wh["url"], rec)
+
     @staticmethod
     def _post(url, rec):
         import urllib.request  # stdlib only, no extra dependency
@@ -1199,6 +1342,41 @@ class OutputBus:
 
 # --------------------------------------------------------------------------
 # grouping: several single-digit ROIs -> one reading
+# --------------------------------------------------------------------------
+
+def counter_state_path(rt, cam_id):
+    p = ((rt.get("counter_reset") or {}).get("state_file") or "").strip()
+    return p.replace("{camera}", str(cam_id)) if p else ""
+
+
+def load_counter_state(path):
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception as exc:          # a corrupt file must not stop the line
+        log("counter state not readable (%s) - starting from zero" % exc, "WARN")
+        return {}
+
+
+def save_counter_state(path, counters):
+    """Write atomically: a power cut mid-write must not destroy the shift count."""
+    if not path or not counters:
+        return
+    data = {rid: c.state() for rid, c in counters.items()}
+    try:
+        ensure_dir(path)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as exc:
+        log("counter state not saved (%s)" % exc, "WARN")
+
+
+# --------------------------------------------------------------------------
+# grouping helpers
 # --------------------------------------------------------------------------
 
 def roi_center(rect):
@@ -1294,6 +1472,19 @@ TASK_COLOUR = {
 }
 
 
+def count_text(roi, v):
+    """A directional counter as something readable at a glance across a room."""
+    p = roi.get("params") or {}
+    a, b = p.get("label_in", "in"), p.get("label_out", "out")
+    bits = []
+    for k in (a, b):
+        if k in v:
+            bits.append("%s %s" % (k.upper(), v[k]))
+    if "net" in v:
+        bits.append("net %s" % v["net"])
+    return "  ".join(bits) or "-"
+
+
 def draw_mark(img, x, y, r):
     """Small TESR emblem: gold ring, dark core, red centre dot."""
     cv2.circle(img, (x, y), r, TESR_GOLD_DEEP, 1, cv2.LINE_AA)
@@ -1317,7 +1508,8 @@ def _panel(img, x, y, w, h, alpha=0.78):
     roi[:] = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, INK, np.uint8), alpha, 0)
 
 
-def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=None):
+def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=None,
+                 period=""):
     """Boxes carry only their reading; names and confidences live in the panel.
 
     With one ROI per digit the boxes sit shoulder to shoulder, so a name label
@@ -1370,12 +1562,15 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
 
         # the reading itself, inside the box so neighbours never collide
         s = "-" if val in (None, "") else str(val)
+        if isinstance(val, dict):
+            s = count_text(roi, val)      # report:"all" hands back the whole dict
         if shape == "line":
-            (tw, th), _ = cv2.getTextSize(s[:14], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cut = 34 if isinstance(val, dict) else 14
+            (tw, th), _ = cv2.getTextSize(s[:cut], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             tx = min(w - tw - 6, max(4, int(pts[:, 0].mean()) + 12))
             ty = max(th + 30, int(pts[:, 1].min()) + th + 6)
             _panel(frame, tx - 5, ty - th - 5, tw + 10, th + 10, 0.7)
-            _text(frame, s[:14], (tx, ty), 0.6, WHITE if readable else TESR_RED, 2)
+            _text(frame, s[:cut], (tx, ty), 0.6, WHITE if readable else TESR_RED, 2)
         elif len(s) <= 4 and bw > 16 and bh > 20:
             scale = max(0.5, min(1.6, bh / 45.0))
             (tw, th), _ = cv2.getTextSize(s, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
@@ -1399,12 +1594,12 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
     _text(frame, bar, (76, 18), 0.45, WHITE)
 
     if show_panel:
-        strip = results_strip(w, rois, results, groups or [])
+        strip = results_strip(w, rois, results, groups or [], period)
         frame = np.vstack([frame, strip])
     return frame
 
 
-def results_strip(width, rois, results, groups):
+def results_strip(width, rois, results, groups, period=""):
     """Every reading in one place, drawn on its own strip that is appended under
     the frame. Adding space is safer than drawing on top: with ten ROIs spread
     over the picture there is no free corner that is guaranteed to stay empty."""
@@ -1438,10 +1633,14 @@ def results_strip(width, rois, results, groups):
         val = res.get("value")
         readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
         s = "-" if val in (None, "") else str(val)
+        if isinstance(val, dict):
+            s = count_text(roi, val)
         _text(strip, "%2d" % (idx + 1), (x, yy), 0.36, TESR_GOLD_DEEP)
         _text(strip, roi["name"][:15], (x + 22, yy), 0.36, GREY)
-        _text(strip, s[:14], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
+        _text(strip, s[:22], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
         _text(strip, "%.2f" % res.get("conf", 0.0), (x + 165, yy), 0.32, GREY)
+    if period:
+        _text(strip, "period  " + str(period), (width - 240, 18), 0.4, TESR_GOLD_DEEP)
     return strip
 
 
@@ -1509,7 +1708,28 @@ def run(cfg, args):
             '"detector": {"path": "best.onnx", "class_names": [...]} to the camera', "WARN")
 
     tracker = LINE.Tracker(**(cam.get("tracker") or {})) if (needs_tracks and LINE) else None
-    ctx = {"scale": cam.get("scale"), "counters": {}, "tracks": {}, "dets": []}
+    reset_cfg = rt.get("counter_reset") or {}
+    ctx = {"scale": cam.get("scale"), "counters": {}, "tracks": {}, "dets": [],
+           "reset": reset_cfg}
+
+    # Counters are built up front rather than on the first crossing, so a saved
+    # shift can be restored before the first frame is read.
+    if LINE is not None:
+        for r in rois:
+            if r.get("task") == "line_count":
+                ctx["counters"][r["id"]] = LINE.LineCounter(r, reset_cfg)
+
+    state_path = counter_state_path(rt, cam.get("id", "cam"))
+    if ctx["counters"]:
+        any_counter = next(iter(ctx["counters"].values()))
+        log("counters : reset=%s  period=%s%s"
+            % (any_counter.clock.mode, any_counter.period or "-",
+               ("  state=" + state_path) if state_path else ""))
+        if state_path and not args.reset_counters:
+            saved = load_counter_state(state_path)
+            for rid, c in ctx["counters"].items():
+                if c.restore(saved.get(rid)):
+                    log("resumed  : %s = %s" % (c.roi["name"], c.value()))
 
     src = FrameSource(source, cam.get("width", 0), cam.get("height", 0))
     bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
@@ -1520,7 +1740,7 @@ def run(cfg, args):
     show_panel = not args.no_panel
     period = 1.0 / max(1.0, float(rt.get("loop_fps", 10)))
     frame_i, fps, t_prev = 0, 0.0, time.time()
-    last_summary, last_summary_at = None, 0.0
+    last_summary, last_summary_at, last_state_save = None, 0.0, time.time()
     every = float(args.every or 0)
 
     def summary_text():
@@ -1594,6 +1814,18 @@ def run(cfg, args):
                                                              datetime.now().strftime("%Y%m%d_%H%M%S")))
                         cv2.imwrite(fn_, frame)
 
+            # shift / daily rollover: publish the closing numbers before zeroing
+            for c in ctx["counters"].values():
+                closed = c.roll()
+                if closed is not None:
+                    bus.publish_event("period_end", closed, echo=(console != "none"))
+            if state_path and (time.time() - last_state_save) >= 5.0:
+                if any(c.dirty for c in ctx["counters"].values()):
+                    save_counter_state(state_path, ctx["counters"])
+                    for c in ctx["counters"].values():
+                        c.dirty = False
+                last_state_save = time.time()
+
             # a completed group reading is published as its own value
             for name, members in groups:
                 text, whole, gconf = group_value(members, results)
@@ -1614,8 +1846,9 @@ def run(cfg, args):
             fps = 0.9 * fps + 0.1 * (1.0 / dt) if dt > 0 else fps
 
             if show:
+                period = next(iter(ctx["counters"].values())).period if ctx["counters"] else ""
                 view = draw_overlay(frame.copy(), cam, results, fps, groups, show_panel,
-                                    ctx.get("tracks"))
+                                    ctx.get("tracks"), period)
                 cv2.imshow("TESR Vision Runner", view)
                 if args.test:
                     strip = debug_strip(debugs, view.shape[1])
@@ -1643,6 +1876,8 @@ def run(cfg, args):
             if sleep > 0:
                 time.sleep(sleep)
     finally:
+        if state_path:
+            save_counter_state(state_path, ctx["counters"])
         src.release()
         bus.close()
         cv2.destroyAllWindows()
@@ -1779,6 +2014,8 @@ def main():
                     help="join single-digit ROIs that sit on the same row into one reading")
     ap.add_argument("--no-panel", dest="no_panel", action="store_true",
                     help="hide the on-screen results panel")
+    ap.add_argument("--reset-counters", dest="reset_counters", action="store_true",
+                    help="start the shift counters at zero, ignoring the saved state file")
     ap.add_argument("--calibrate", help="tune params of one ROI with live sliders")
     ap.add_argument("--list", action="store_true", help="list cameras and ROIs, then exit")
     ap.add_argument("--selftest", action="store_true", help="verify the digit reader offline")

@@ -1,0 +1,54 @@
+{
+  "schema": "tesr.roi.v1",
+  "project": "Licence Plate Reader",
+  "runtime": {
+    "loop_fps": 5,
+    "show_window": false,
+    "print_console": true,
+    "console": "summary"
+  },
+  "cameras": [
+    {
+      "id": "gate",
+      "name": "Front Gate",
+      "source": "../examples/plate.jpg",
+      "width": 640,
+      "height": 480,
+      "rotate": 0,
+      "rois": [
+        {
+          "id": "plate1",
+          "name": "plate",
+          "enabled": true,
+          "task": "plate_ocr",
+          "output_key": "plate",
+          "stable_frames": 2,
+          "every_n_frames": 1,
+          "upscale_to": 200,
+          "rect": {
+            "x": 0.39062,
+            "y": 0.71875,
+            "w": 0.26562,
+            "h": 0.11458,
+            "angle": 0
+          },
+          "params": {
+            "engine": "tesseract",
+            "lang": "eng",
+            "psm": 7,
+            "whitelist": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            "pattern": "",
+            "min_chars": 4,
+            "max_chars": 12,
+            "plate_height": 96,
+            "clahe": true,
+            "denoise": true,
+            "preprocess": true,
+            "invert": false
+          }
+        }
+      ]
+    }
+  ],
+  "_note": "Draw the ROI around the registration row only, not the province or state name. Set \"pattern\" to the plate format used where the camera is installed, e.g. ^[A-Z]{2}[0-9]{4}$ - a reading that does not match it is withheld instead of reported. Plates with non-Latin characters need easyocr, or Tesseract with that language pack, and those characters in \"whitelist\". Needs pytesseract plus the Tesseract engine on the device."
+}

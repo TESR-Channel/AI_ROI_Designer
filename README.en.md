@@ -2,6 +2,8 @@
 
 *ฉบับภาษาไทย: [README.th.md](README.th.md) · [Back to the repository README](README.md)*
 
+**Open the tool: https://tesr-channel.github.io/AI_ROI_Designer/**
+
 Two pieces that work together for AI Vision on edge devices.
 
 | File | What it does | Where it runs |
@@ -22,7 +24,7 @@ Two ways, same file.
 
 **Double-click `index.html`.** Nothing to install, no server.
 
-**Or publish it on GitHub Pages** and open the link (see `github-pages/`). Better for sharing with a team or a customer, and the live camera always works because the page is served over https.
+**Or use the published copy at https://tesr-channel.github.io/AI_ROI_Designer/.** Better for sharing with a team or a customer, and the live camera always works because the page is served over https. Section 1.4 covers publishing your own.
 
 Python only enters the picture once you export and run on the target device.
 
@@ -34,7 +36,7 @@ The only thing that needs the internet is the **first use of an `.onnx` model or
 
 ```text
 Photograph the machine
-  -> open roi_designer.html and drag out ROIs (many per camera, many cameras)
+  -> open index.html and drag out ROIs (many per camera, many cameras)
   -> pick a task per ROI (digits / OCR / YOLO / QR & barcode / change / colour)
   -> read values in the browser to tune the parameters
   -> export config.json + tesr_vision_runner.py
@@ -55,21 +57,29 @@ The page has three working modes.
 
 ## 1.4 Publishing on GitHub Pages
 
-Everything is prepared in `github-pages/`.
+The live copy of this repository is at
+
+**https://tesr-channel.github.io/AI_ROI_Designer/**
+
+Everything needed to publish your own is already in the repository root:
 
 ```
-github-pages/
-  index.html                     the tool (identical to roi_designer.html)
-  .nojekyll                      keeps Jekyll from touching the files
-  README.md                      README for the repository
-  .github/workflows/deploy.yml   deploys on every push
+index.html                 the tool, one self-contained file
+.nojekyll                  keeps Jekyll from touching the files
+.github/workflows/ci.yml   runs the test suite on every push
 ```
 
-1. Create a repository and upload everything in that folder
-2. **Settings → Pages → Source**, choose **GitHub Actions**
+1. Fork this repository, or create one and upload these files
+2. **Settings → Pages → Source**, choose **Deploy from a branch** → `main` / root
 3. Push to `main` and wait about a minute
 
-To publish a new version, replace `index.html` with the new `index.html` and push.
+`index.html` is at the repository root so Pages can serve it with no build step: the
+page you push is the page that is served.
+
+The workflow does not deploy. It runs `tests/run_all.sh` and
+`tools/embed_python.py --check`, which is the check that matters — a page whose
+embedded Python has drifted from `runner/` would hand visitors an export that cannot
+run their own config.
 
 Exporting config and Python still works exactly the same, because those files are generated in the visitor's browser and never touch the server.
 
@@ -103,6 +113,7 @@ Preprocessing (letterbox) and decoding (NMS) are written to match on both sides 
 |---|---|---|
 | `digits_7seg` | Read digits from a 7-segment / LED / LCD machine panel | No — pure OpenCV |
 | `ocr_text` | Read general text and numbers | Python: pytesseract or easyocr · Browser: Tesseract.js (first run needs internet) |
+| `plate_ocr` | Read a licence plate, with the plate format enforced | Same OCR engines as `ocr_text` |
 | `yolo_detect` | Detect objects inside the ROI, count them or return details | Your own `.onnx` |
 | `yolo_classify` | Classify the ROI, e.g. OK / NG | Your own `.onnx` |
 | `barcode_qr` | Read QR codes and linear barcodes | No — decoders are bundled on both sides |
@@ -154,6 +165,36 @@ Expected output from `sample_machine.jpg`:
   "conveyor": false
 }
 ```
+
+Other sample configs:
+
+```bash
+python tesr_vision_runner.py --config ../examples/meters_grouped.json --once --auto-group
+python tesr_vision_runner.py --config ../examples/plate_config.json --once
+python tesr_vision_runner.py --config ../examples/linezone_config.json --list
+```
+
+### Running the checks
+
+```bash
+bash tests/run_all.sh
+```
+
+What it covers, and what it deliberately does not:
+
+| Check | What it proves |
+|---|---|
+| `tools/embed_python.py --check` | the Python the export button hands out is identical to `runner/` |
+| `--selftest` | the 7-segment reader, against rendered displays |
+| `tests/shift_test.py` | shift and daily boundaries, including a night shift crossing midnight, and resuming after a restart |
+| `tests/counter_loop_test.py` | the whole runner loop: a box crossing a gate, a rollover published as an event, the state file |
+| `tests/plate_test.py` | the plate reader, and the readings it must refuse |
+| `tests/page_test.js` | `index.html` boots without an error, both languages are complete, every task has a label, a hint and defaults |
+| the example configs | they still run end to end |
+
+**It does not measure accuracy.** Every image in these tests is drawn by the test itself, with
+even lighting and no lens. They prove the logic is right, not that a camera on your wall will
+read a plate or a meter correctly. That is what the site visit is for.
 
 ---
 
@@ -490,6 +531,80 @@ walking up to the line and turning back, or for passing beyond its end.
 
 Output can be `all` (in/out/net/total), `net`, `in`, `out` or `total`.
 
+### Resetting the counters by shift or by day
+
+A counter that never resets is of no use to a supervisor who wants last night's figure.
+**Runtime → Reset counters** sets the boundary:
+
+| Mode | Boundary | Period label |
+|---|---|---|
+| Never | the counters run until the program stops | — |
+| Per shift | each time listed in *Shift start times*, e.g. `06:00, 14:00, 22:00` | `2026-10-10 A` |
+| Daily | once a day at *Reset at* | `2026-10-10` |
+| Hourly | on the hour | `2026-10-10 15h` |
+| Every N minutes | every N minutes, counted from midnight | `2026-10-10 15:30` |
+
+A shift that starts at 22:00 and ends at 06:00 keeps the date it **started** on, which is how
+the handover sheet on the wall reads it.
+
+Two sets of numbers are reported, always:
+
+```json
+{"in": 12, "out": 3, "net": 9, "total": 15,
+ "period": "2026-10-10 A", "lifetime_in": 1840, "lifetime_out": 1792}
+```
+
+`in` / `out` are this shift. `lifetime_in` / `lifetime_out` are the running total since
+installation and are never reset — which is what makes a restart visible instead of silent.
+
+At each boundary, before the counter returns to zero, the closing numbers are published as
+their own event:
+
+```
+topic   tesr/vision/<camera>/event/period_end
+```
+```json
+{"time": "2026-10-10T14:00:01", "camera": "cam1", "event": "period_end",
+ "roi": "door_gate", "period": "2026-10-10 A",
+ "period_start": "2026-10-10T06:00:00", "period_end": "2026-10-10T14:00:01",
+ "in": 12, "out": 3, "net": 9, "total": 15,
+ "lifetime_in": 1840, "lifetime_out": 1792}
+```
+
+The same record goes to the JSONL and CSV logs and to the webhook, so a Node-RED flow can
+file a shift against the shift that produced it instead of having to notice that a counter
+went back to zero.
+
+### Surviving a power cut
+
+Set **Counter state file** — `logs/counters_{camera}.json` — and the counts are written to
+disk, atomically, at most once every five seconds and once more on shutdown. On startup:
+
+- restarted **inside** the same shift → the shift count is picked back up
+- restarted **after** the shift changed → the new shift starts at zero, lifetime total intact
+- `--reset-counters` on the command line → ignore the file and start clean
+
+`{camera}` in the path is replaced with the camera id, so several cameras can share one setting.
+
+A per-ROI override is available in the config for the rare case where two gates on one camera
+work different shifts: put the same block under that ROI's `params.reset`.
+
+```json
+"runtime": {
+  "counter_reset": {
+    "mode": "shift",
+    "shifts": ["06:00", "14:00", "22:00"],
+    "state_file": "logs/counters_{camera}.json"
+  }
+}
+```
+
+Shifts can also be named, which is clearer in a dashboard than A/B/C:
+
+```json
+"shifts": [{"at": "08:00", "name": "day"}, {"at": "20:00", "name": "night"}]
+```
+
 ### Counting inside a zone
 
 Drag out a box then move the points to fit the area; `+ point` and `− point` adjust the corners.
@@ -500,6 +615,69 @@ box centre can fall outside the zone while the feet are inside it.
 
 These tasks use `tesr_line_engine.py`, which must sit next to `tesr_vision_runner.py`.
 If it is missing the runner says so at startup instead of failing partway through.
+
+---
+
+## 6.8 Reading a licence plate
+
+The `plate_ocr` task is OCR with the plate alphabet and the plate format enforced on top.
+
+**Draw the box around the registration row only.** Leave the province, state or country
+name out of it: `psm 7` reads one line of text, and a second line of different characters
+below the number is the most common reason a plate reads as nonsense.
+
+What it does before the OCR engine sees the crop:
+
+1. upscales to **Upscale to height** — a plate in a gate camera is often 20–40 px tall, well
+   under what Tesseract needs, and upscaling first does more than any parameter tuning later
+2. reduces noise, then evens out the light (CLAHE), which rescues a hazy or half-shaded plate
+3. binarises, taking the polarity from the border of the crop — the border of a plate crop is
+   background, so it says whether this is dark characters on a light plate or the reverse
+
+**Plate format is the safety net, and the reason to use this task rather than plain OCR.**
+
+```json
+"params": {"pattern": "^[A-Z]{2}[0-9]{4}$", "min_chars": 4, "max_chars": 12}
+```
+
+A reading that cannot match the format is **withheld**, not reported — a wrong plate number
+in a gate log is worse than no plate number. Where the format is unambiguous, one confusable
+character is swapped and retried (`O`↔`0`, `I`↔`1`, `S`↔`5`, `B`↔`8`, `Z`↔`2`, `G`↔`6`), and
+only accepted if the format then fits. Without a `pattern`, nothing is swapped and nothing is
+format-checked; you get the cleaned characters as read.
+
+### Plates that are not A–Z 0–9
+
+A Thai plate carries Thai characters, and the same applies to Arabic, Cyrillic or Chinese
+plates. Those need either `easyocr`, or Tesseract with that language pack installed on the
+device, plus those characters added to the allowed list:
+
+```bash
+sudo apt install tesseract-ocr-tha      # Debian / Raspberry Pi OS
+```
+```json
+"params": {"engine": "tesseract", "lang": "tha+eng",
+           "whitelist": "กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ0123456789"}
+```
+
+The browser preview can only try A–Z 0–9, because that is what the bundled Tesseract.js
+language data covers. Tune the box and the format there, then confirm the reading with Python
+on the device.
+
+### Try it
+
+```bash
+cd runner
+python tesr_vision_runner.py --config ../examples/plate_config.json --once
+```
+
+`examples/plate.jpg` is a drawn sample, not a photograph of a real vehicle.
+
+**What this is not.** This is a plate *reader* for one region you point at a plate. It is not
+a full ANPR system: it does not find the plate in the frame for you, and it does not follow a
+car across frames. For a moving vehicle, put a detector model on the camera, use a counting
+line to decide when the car is in position, and read the plate from a ROI covering that spot —
+or train a plate-detector model and crop from its box.
 
 ---
 

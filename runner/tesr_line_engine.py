@@ -16,6 +16,8 @@ Kept dependency-free beyond OpenCV and numpy so it runs on a Raspberry Pi.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import numpy as np
 
 try:
@@ -311,14 +313,18 @@ def _marks_along(prof, min_contrast, dark=None):
     thr = bg - depth * 0.5 if dark else bg + depth * 0.5
     sel = prof < thr if dark else prof > thr
 
-    # Random texture also produces "marks". A printed mark stands clear of a
-    # quiet background: measured on real scales the depth is 9x the background
-    # spread or better, while noise sits around 4x, so 6x separates them with
-    # room on both sides.
-    quiet = prof[~sel]
-    if quiet.size > 3:
-        spread = float(quiet.std())
-        if depth < spread * float(6.0):
+    # Random texture also produces "marks", so the depth has to beat the
+    # background's own roughness. That roughness must be measured on the FLAT
+    # stretches between the marks, not across the whole line: where marks are
+    # closely spaced most samples sit on a transition slope, and including them
+    # makes a clean ruler look as rough as noise.
+    #
+    # Measured on real images: printed scales score 11x and up, random noise and
+    # fabric texture score under 7x, so 9x separates them with room either side.
+    plateau = prof[prof >= np.percentile(prof, 70)] if dark else prof[prof <= np.percentile(prof, 30)]
+    if plateau.size > 3:
+        spread = float(plateau.std())
+        if depth < spread * float(9.0):
             return [], dark
 
     runs, i, n = [], 0, len(sel)
@@ -500,11 +506,104 @@ class Tracker:
 
 
 # --------------------------------------------------------------------------
+# when does the counting period start, and what is it called?
+# --------------------------------------------------------------------------
+
+def parse_hm(s):
+    """"06:30" -> 390 minutes past midnight. None when it cannot be read."""
+    try:
+        parts = str(s).strip().split(":")
+        hh = int(parts[0])
+        mm = int(parts[1]) if len(parts) > 1 else 0
+    except (ValueError, IndexError, TypeError):
+        return None
+    if not (0 <= hh < 24 and 0 <= mm < 60):
+        return None
+    return hh * 60 + mm
+
+
+class PeriodClock:
+    """Decides which counting period the clock is in.
+
+    modes
+      none      the counters run until the program stops
+      daily     rolls over once a day at "at"
+      shift     rolls over at each time listed in "shifts"
+      hourly    rolls over on the hour
+      minutes   rolls over every "minutes" minutes, measured from midnight
+
+    A shift starting at 22:00 and ending at 06:00 belongs to the day it STARTED
+    on, because that is how the handover sheet on the factory wall reads it.
+    """
+
+    def __init__(self, cfg=None):
+        cfg = cfg or {}
+        self.mode = str(cfg.get("mode") or "none").lower()
+        self.at = parse_hm(cfg.get("at", "00:00")) or 0
+        self.minutes = max(1, int(cfg.get("minutes") or 60))
+        self.shifts = []
+        for s in cfg.get("shifts") or []:
+            if isinstance(s, dict):
+                m, name = parse_hm(s.get("at")), str(s.get("name") or "")
+            else:
+                m, name = parse_hm(s), ""
+            if m is None:
+                continue
+            self.shifts.append((m, name or chr(ord("A") + len(self.shifts))))
+        self.shifts.sort()
+        if self.mode == "shift" and not self.shifts:
+            # shifts were asked for but none were given: a daily rollover is
+            # closer to what was meant than silently never resetting
+            self.mode = "daily"
+
+    def _boundaries(self):
+        if self.mode == "daily":
+            return [(self.at, "")]
+        if self.mode == "hourly":
+            return [(h * 60, "%02dh" % h) for h in range(24)]
+        if self.mode == "minutes":
+            return [(m, "") for m in range(0, 24 * 60, self.minutes)]
+        if self.mode == "shift":
+            return list(self.shifts)
+        return []
+
+    def boundary(self, now=None):
+        """(start datetime, label) of the period that contains `now`."""
+        bounds = self._boundaries()
+        if not bounds:
+            return None, ""
+        now = now or datetime.now()
+        mins = now.hour * 60 + now.minute
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        chosen = None
+        for m, nm in bounds:
+            if m <= mins:
+                chosen = (m, nm, midnight)
+        if chosen is None:                       # still inside yesterday's period
+            m, nm = bounds[-1]
+            chosen = (m, nm, midnight - timedelta(days=1))
+        m, nm, base = chosen
+        start = base + timedelta(minutes=m)
+        if self.mode == "minutes":
+            return start, start.strftime("%Y-%m-%d %H:%M")
+        label = start.strftime("%Y-%m-%d")
+        return start, (label + " " + nm).strip() if nm else label
+
+
+# --------------------------------------------------------------------------
 # task: counting across a line, with direction
 # --------------------------------------------------------------------------
 
 class LineCounter:
-    def __init__(self, roi):
+    """Counts tracks crossing a gate, separately in each direction.
+
+    Two sets of numbers are kept: the ones for the current period, which the
+    clock above resets at every shift or day boundary, and a running lifetime
+    total that is never reset. The shift figure is what the supervisor reads;
+    the lifetime figure is what makes a restart visible instead of silent.
+    """
+
+    def __init__(self, roi, reset=None):
         p = roi.get("params") or {}
         self.roi = roi
         self.name_in = p.get("label_in", "in")
@@ -512,7 +611,11 @@ class LineCounter:
         self.classes = p.get("classes") or []
         self.invert = bool(p.get("invert"))
         self.counts = {self.name_in: 0, self.name_out: 0}
+        self.lifetime = {self.name_in: 0, self.name_out: 0}
         self.seen = {}                    # track id -> last side
+        self.clock = PeriodClock(p.get("reset") or reset)
+        self.period_start, self.period = self.clock.boundary()
+        self.dirty = False                # something to save since the last write
 
     def update(self, tracks, w, h):
         a, b = denorm(self.roi["points"], w, h)
@@ -538,14 +641,82 @@ class LineCounter:
                 going_in = not going_in
             key = self.name_in if going_in else self.name_out
             self.counts[key] += 1
+            self.lifetime[key] += 1
+            self.dirty = True
             crossed.append((tid, key))
         for tid in [t for t in self.seen if t not in tracks]:
             del self.seen[tid]
         return crossed
 
+    def roll(self, now=None):
+        """Close the period if the clock has moved on.
+
+        Returns the closing record so it can be published and logged, or None
+        when the period has not changed. `seen` is deliberately left alone: a
+        track that is halfway across the gate at the boundary should still be
+        counted once, in the period it finishes crossing in.
+        """
+        if self.clock.mode == "none":
+            return None
+        now = now or datetime.now()
+        start, label = self.clock.boundary(now)
+        if label == self.period:
+            return None
+        rec = self.value()
+        rec["period"] = self.period
+        rec["period_start"] = self.period_start.isoformat(timespec="seconds") \
+            if self.period_start else ""
+        rec["period_end"] = now.isoformat(timespec="seconds")
+        rec["roi"] = self.roi.get("name", "")
+        self.counts = {self.name_in: 0, self.name_out: 0}
+        self.period_start, self.period = start, label
+        self.dirty = True
+        return rec
+
     def value(self):
         i, o = self.counts[self.name_in], self.counts[self.name_out]
-        return {self.name_in: i, self.name_out: o, "net": i - o, "total": i + o}
+        v = {self.name_in: i, self.name_out: o, "net": i - o, "total": i + o}
+        if self.clock.mode != "none":
+            # flat keys, because Node-RED and most dashboards read them directly
+            v["period"] = self.period
+            v["lifetime_" + self.name_in] = self.lifetime[self.name_in]
+            v["lifetime_" + self.name_out] = self.lifetime[self.name_out]
+        return v
+
+    # --- surviving a restart ------------------------------------------------
+
+    def state(self):
+        return {"period": self.period,
+                "period_start": self.period_start.isoformat(timespec="seconds")
+                                if self.period_start else "",
+                "counts": dict(self.counts),
+                "lifetime": dict(self.lifetime)}
+
+    def restore(self, st):
+        """Resume from a saved state.
+
+        The lifetime total always comes back. The period counts only come back
+        when the saved period is still the current one - restarting the Pi in
+        the middle of a shift must not lose the shift, and restarting it after
+        the shift changed must not carry the old shift's numbers forward.
+        """
+        if not isinstance(st, dict):
+            return False
+        for k, v in (st.get("lifetime") or {}).items():
+            if k in self.lifetime:
+                try:
+                    self.lifetime[k] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        if st.get("period") != self.period:
+            return False
+        for k, v in (st.get("counts") or {}).items():
+            if k in self.counts:
+                try:
+                    self.counts[k] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        return True
 
 
 # --------------------------------------------------------------------------

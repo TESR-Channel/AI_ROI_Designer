@@ -1,0 +1,40 @@
+# Runs on every push. It does NOT deploy: GitHub Pages already publishes
+# index.html straight from the branch, so there is nothing for a workflow to do
+# except make sure what gets published actually works.
+#
+# The check that matters most is the first one. The export button hands visitors
+# the copy of the Python embedded in index.html; if that has drifted from
+# runner/, they get an export that cannot run their own config.
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Embedded Python matches runner/
+        run: python3 tools/embed_python.py --check
+
+      - name: Install what the tests need
+        run: |
+          python3 -m pip install --quiet opencv-python-headless numpy pytesseract
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tesseract-ocr
+          npm install --silent jsdom
+
+      - name: Run the test suite
+        run: bash tests/run_all.sh
