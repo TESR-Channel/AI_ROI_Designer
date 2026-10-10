@@ -5,6 +5,9 @@
 # The check that matters most is the first one. The export button hands visitors
 # the copy of the Python embedded in index.html; if that has drifted from
 # runner/, they get an export that cannot run their own config.
+#
+# Each suite is its own step on purpose: when something fails, the name of the
+# red step says what failed without anyone having to open the log.
 name: Checks
 
 on:
@@ -29,12 +32,48 @@ jobs:
       - name: Embedded Python matches runner/
         run: python3 tools/embed_python.py --check
 
-      - name: Install what the tests need
+      - name: Install dependencies
         run: |
           python3 -m pip install --quiet opencv-python-headless numpy pytesseract
           sudo apt-get update -qq
           sudo apt-get install -y -qq tesseract-ocr
           npm install --silent jsdom
 
-      - name: Run the test suite
-        run: bash tests/run_all.sh
+      - name: Environment
+        run: |
+          python3 -c "import cv2, numpy; print('opencv', cv2.__version__, '| numpy', numpy.__version__)"
+          tesseract --version | head -1
+          node --version
+
+      - name: Digit reader selftest
+        run: python3 -I runner/tesr_vision_runner.py --selftest
+
+      - name: Shift and daily counter reset
+        run: python3 -I tests/shift_test.py
+
+      - name: Counter loop end to end
+        run: python3 -I tests/counter_loop_test.py
+
+      - name: Licence plate preset
+        run: python3 -I tests/plate_test.py
+
+      - name: Example config - machine display
+        run: |
+          python3 -I runner/tesr_vision_runner.py \
+            --config examples/demo_config.json \
+            --image examples/sample_machine.jpg --once --headless
+
+      - name: Example config - grouped meters
+        run: |
+          python3 -I runner/tesr_vision_runner.py \
+            --config examples/meters_grouped.json \
+            --image examples/meters.jpg --once --headless
+
+      - name: Example config - licence plate
+        run: |
+          python3 -I runner/tesr_vision_runner.py \
+            --config examples/plate_config.json \
+            --image examples/plate.jpg --once --headless
+
+      - name: index.html in a headless DOM
+        run: node tests/page_test.js
