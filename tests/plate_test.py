@@ -138,6 +138,58 @@ check("too many characters is refused",
 check("lower case input is normalised",
       R.plate_clean("ab1234", {})[0], "AB1234")
 
+# ----------------------------------------------------------------- Thai plates
+# Format: an optional leading digit, one or two Thai consonants, then 1-4 digits
+# with no leading zeros. "กข 1234" and "1กข 1234" are both valid, and "กข 1" is
+# legal too, which is why min_chars drops to 3.
+# These check our own logic. Whether Tesseract reads Thai glyphs off a real
+# plate depends on the language pack, the plate font and the site, exactly as
+# the Latin reads above do.
+print()
+print("--- Thai plates ---")
+TH_PAT = r"^[0-9]?[ก-ฮ]{1,2}[0-9]{1,4}$"
+TH = {"lang": "tha+eng", "pattern": TH_PAT, "min_chars": 3}
+
+check("the Thai alphabet follows from lang",
+      R.plate_alphabet({"lang": "tha+eng"}), R.THAI_PLATE_CHARS)
+check("an explicit whitelist still wins over lang",
+      R.plate_alphabet({"lang": "tha", "whitelist": "กข01"}), "กข01")
+check("two consonants and four digits",
+      R.plate_clean("กข1234", TH)[0], "กข1234")
+check("a leading digit is allowed",
+      R.plate_clean("1กข2345", TH)[0], "1กข2345")
+check("a one digit serial is a legal plate",
+      R.plate_clean("กข1", TH)[0], "กข1")
+check("Thai digits are the same digits",
+      R.plate_clean("กข๑๒๓๔", TH)[0], "กข1234")
+check("surrounding marks are dropped",
+      R.plate_clean("*กข-1234*", TH)[0], "กข1234")
+check("a confusable Thai consonant is corrected when the format then fits",
+      R.plate_clean("ถข1234", {"lang": "tha", "min_chars": 3,
+                               "pattern": r"^ก[ก-ฮ][0-9]{4}$"})[0], "กข1234")
+check("no Thai swap is invented when none makes the format fit",
+      R.plate_clean("กข12", {"lang": "tha", "min_chars": 3,
+                             "pattern": r"^[ก-ฮ]{2}[0-9]{4}$"})[0], "")
+
+# The reader and the cleaner have to agree on one alphabet. When they did not, a
+# Thai plate was read correctly and then had every Thai character filtered out
+# again on the way back, reporting the four digits as if they were the plate --
+# a valid-looking number belonging to a different vehicle.
+check("a Thai plate is not silently reduced to its digits",
+      R.plate_clean("กข1234", {})[0], "")
+check("and the reason names the setting to change",
+      "lang" in R.plate_clean("กข1234", {})[1], True)
+check("a Latin plate under a Thai alphabet is refused too",
+      R.plate_clean("AB1234", {"lang": "tha", "min_chars": 3})[0], "")
+
+# EasyOCR names languages differently from Tesseract. One config, either engine.
+check("tesseract lang codes are translated for easyocr",
+      R.easyocr_langs("tha+eng"), ["th", "en"])
+check("easyocr's own codes pass through untouched",
+      R.easyocr_langs("th+en"), ["th", "en"])
+check("an empty lang falls back to english",
+      R.easyocr_langs(""), ["en"])
+
 print()
 if SOFT:
     print("%d of 9 synthetic plates read exactly; these did not, which is "

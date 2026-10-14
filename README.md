@@ -26,7 +26,7 @@ Point a camera at a machine, a tank, a doorway or a conveyor, mark what you care
 |---|---|---|---|
 | Box | `digits_7seg` | Read a 7-segment or LCD panel on a machine | No |
 | Box | `ocr_text` | Read printed text or numbers | No |
-| Box | `plate_ocr` | Licence plate — ROI → OCR, with the plate format enforced | No |
+| Box | `plate_ocr` | Licence plate — ROI → OCR, with the plate format enforced. Thai plates built in | No |
 | Box | `barcode_qr` | QR, Code 128, Code 39, EAN-13, UPC-A, EAN-8, ITF | No |
 | Box | `color_check` | Tower light, status lamp, part colour | No |
 | Box | `presence_diff` | Something appeared, moved or went missing | No |
@@ -188,7 +188,7 @@ MIT — see [LICENSE](LICENSE). Bundled and CDN components are listed in [THIRD_
 |---|---|---|---|
 | กรอบ | อ่านตัวเลข 7-segment | อ่านค่าจากจอเครื่องจักร | ไม่ต้อง |
 | กรอบ | OCR | อ่านข้อความหรือตัวเลขทั่วไป | ไม่ต้อง |
-| กรอบ | อ่านป้ายทะเบียน | ROI → OCR พร้อมตรวจรูปแบบป้าย | ไม่ต้อง |
+| กรอบ | อ่านป้ายทะเบียน | ROI → OCR พร้อมตรวจรูปแบบป้าย รองรับป้ายไทยในตัว | ไม่ต้อง |
 | กรอบ | Barcode / QR | QR, Code 128, Code 39, EAN-13, UPC-A, EAN-8, ITF | ไม่ต้อง |
 | กรอบ | ตรวจสี | ไฟหอคอย ไฟสถานะ สีชิ้นงาน | ไม่ต้อง |
 | กรอบ | ตรวจการเปลี่ยนแปลง | มีของมาวาง ของหาย ของขยับ | ไม่ต้อง |
