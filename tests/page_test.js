@@ -117,6 +117,27 @@ whenReady(() => {
         pc("AB1234", { pattern: "([unclosed" }).plate, "AB1234");
   check("a rejection carries a reason", pc("ABCDEF", sq).reason.length > 0, true);
 
+  // Thai plates: the browser preview has to agree with the runner here too,
+  // because a Thai ROI tuned in the browser is exported straight to the device.
+  const TH = { lang: "tha+eng", pattern: "^[0-9]?[\u0e01-\u0e2e]{1,2}[0-9]{1,4}$",
+               min_chars: 3 };
+  check("the Thai alphabet follows from lang",
+        G("plateAlphabet")({ lang: "tha+eng" }), G("THAI_PLATE_CHARS"));
+  check("an explicit whitelist still wins over lang",
+        G("plateAlphabet")({ lang: "tha", whitelist: "\u0e01\u0e0201" }), "\u0e01\u0e0201");
+  check("two Thai consonants and four digits",
+        pc("\u0e01\u0e021234", TH).plate, "\u0e01\u0e021234");
+  check("a leading digit is allowed", pc("1\u0e01\u0e022345", TH).plate, "1\u0e01\u0e022345");
+  check("Thai digits are the same digits",
+        pc("\u0e01\u0e02\u0e51\u0e52\u0e53\u0e54", TH).plate, "\u0e01\u0e021234");
+  check("a confusable Thai consonant is corrected when the format then fits",
+        pc("\u0e16\u0e021234", { lang: "tha", min_chars: 3,
+                          pattern: "^\u0e01[\u0e01-\u0e2e][0-9]{4}$" }).plate, "\u0e01\u0e021234");
+  check("a Thai plate is not silently reduced to its digits",
+        pc("\u0e01\u0e021234", {}).plate, "");
+  check("a Latin plate under a Thai alphabet is refused too",
+        pc("AB1234", { lang: "tha", min_chars: 3 }).plate, "");
+
   console.log("\n--- counter reset settings ---");
   const cr = G("state").runtime.counter_reset;
   check("default is no reset", cr.mode, "none");

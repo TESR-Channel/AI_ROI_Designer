@@ -646,32 +646,73 @@ character is swapped and retried (`O`↔`0`, `I`↔`1`, `S`↔`5`, `B`↔`8`, `Z
 only accepted if the format then fits. Without a `pattern`, nothing is swapped and nothing is
 format-checked; you get the cleaned characters as read.
 
-### Plates that are not A–Z 0–9
+### Thai plates
 
-A Thai plate carries Thai characters, and the same applies to Arabic, Cyrillic or Chinese
-plates. Those need either `easyocr`, or Tesseract with that language pack installed on the
-device, plus those characters added to the allowed list:
+Set the language and the rest follows — you do not have to restate the Thai consonants in
+every config:
+
+```json
+"params": {"engine": "tesseract", "lang": "tha+eng",
+           "pattern": "^[0-9]?[ก-ฮ]{1,2}[0-9]{1,4}$",
+           "min_chars": 3}
+```
+
+`lang: "tha+eng"` selects the Thai alphabet — the 44 consonants plus digits, which is what a
+registration row contains. There are no Latin letters, vowels or tone marks on a plate, so
+they are not in the alphabet. A `whitelist` of your own still overrides this if you need it.
+
+**The format.** A Thai private car plate is an optional leading digit, one or two Thai
+consonants, then 1 to 4 digits with no leading zeros — `กข 1234` and `1กข 1234` are both
+valid, and `กข 1` is legal too, which is why `min_chars` drops to 3. Motorcycle plates put
+the series, the province and the number on three separate rows: draw a separate ROI for the
+top and the bottom row rather than one box around both.
+
+**Draw the box around the registration row only.** The province name underneath is a second
+line of text and it will wreck a single-line read. It is not read, by design.
+
+**Thai digits** (๐๑๒๓๔๕๖๗๘๙) are normalised to 0–9 before anything else happens. That is not a
+guess about the character, it is the same digit written another way.
+
+**Confusable consonants** are swapped and retried exactly like the Latin pairs above — only
+one at a time, and only if the format then fits. The list covers consonants that differ by a
+loop, a tail or a single stroke (`ก`↔`ถ`↔`ภ`, `ค`↔`ด`↔`ต`, `ข`↔`ช`, `บ`↔`ป`, `พ`↔`ฟ`,
+`ร`↔`ธ`, `ม`↔`น`, and others). Treat it as a starting list: which pairs actually get
+confused depends on the plate font and your camera, so add to it from your own misreads.
+
+**Install the language data** on the device — this is the step people miss:
 
 ```bash
 sudo apt install tesseract-ocr-tha      # Debian / Raspberry Pi OS
 ```
-```json
-"params": {"engine": "tesseract", "lang": "tha+eng",
-           "whitelist": "กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ0123456789"}
-```
 
-The browser preview can only try A–Z 0–9, because that is what the bundled Tesseract.js
-language data covers. Tune the box and the format there, then confirm the reading with Python
-on the device.
+Or set `"engine": "easyocr"`, which downloads its own Thai model on first use. The same
+config works with either engine: EasyOCR names languages with two letters and Tesseract with
+three, and `lang` is translated for you, so `"tha+eng"` is correct for both.
+
+**A script mismatch is refused, not guessed.** If Thai characters are read while the ROI is
+set to the Latin alphabet, the reading is withheld and the reason names the setting to
+change. Without that check the two Thai letters would be filtered out and the four digits
+reported on their own — a valid-looking plate belonging to a different vehicle. The reverse
+case, Latin letters under a Thai alphabet, is refused the same way.
+
+The same applies to Arabic, Cyrillic or Chinese plates: `easyocr`, or Tesseract with that
+language pack, plus those characters in `whitelist`. Only Thai has a built-in alphabet.
+
+The browser preview will fetch the Tesseract.js language data for whatever `lang` is set to,
+so Thai can be tuned there — but it is still a preview. Confirm the reading with Python on the
+device, where the language pack and the real camera are.
 
 ### Try it
 
 ```bash
 cd runner
 python tesr_vision_runner.py --config ../examples/plate_config.json --once
+python tesr_vision_runner.py --config ../examples/plate_config_th.json --once   # Thai
 ```
 
-`examples/plate.jpg` is a drawn sample, not a photograph of a real vehicle.
+`examples/plate.jpg` is a drawn sample, not a photograph of a real vehicle. The Thai config
+points at a camera rather than a sample image, because there is no Thai sample plate in the
+repository — point it at your own gate.
 
 **What this is not.** This is a plate *reader* for one region you point at a plate. It is not
 a full ANPR system: it does not find the plate in the frame for you, and it does not follow a

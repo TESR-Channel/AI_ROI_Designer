@@ -453,6 +453,33 @@ def task_digits(crop, roi):
 
 _OCR = {"engine": None, "obj": None}
 
+# Tesseract names languages with three letters, EasyOCR with two. A config is
+# written once and should survive switching "engine", so translate rather than
+# making the user remember which spelling belongs to which engine.
+OCR_LANG_EASYOCR = {
+    "eng": "en", "tha": "th", "chi_sim": "ch_sim", "chi_tra": "ch_tra",
+    "jpn": "ja", "kor": "ko", "vie": "vi", "deu": "de", "fra": "fr",
+    "spa": "es", "ita": "it", "por": "pt", "rus": "ru", "ara": "ar",
+    "hin": "hi", "msa": "ms", "ind": "id", "nld": "nl",
+}
+
+
+def easyocr_langs(lang):
+    """'tha+eng' -> ['th', 'en'].
+
+    EasyOCR raises on an unknown code, so anything already in its own spelling
+    is passed through untouched and only the Tesseract names are mapped.
+    """
+    out = []
+    for part in (lang or "en").split("+"):
+        part = part.strip()
+        if not part:
+            continue
+        code = OCR_LANG_EASYOCR.get(part.lower(), part)
+        if code not in out:
+            out.append(code)
+    return out or ["en"]
+
 
 def task_ocr(crop, roi):
     p = roi.get("params") or {}
@@ -481,10 +508,14 @@ def task_ocr(crop, roi):
             import easyocr
         except ImportError:
             return "", 0.0, dbg
-        if _OCR["engine"] != "easyocr":
-            langs = (p.get("lang", "en") or "en").split("+")
+        langs = easyocr_langs(p.get("lang", "en"))
+        key = ("easyocr", tuple(langs))
+        if _OCR["engine"] != key:
+            # Keyed on the languages as well as the engine: a config with a Thai
+            # plate ROI and an English text ROI needs two readers, not whichever
+            # one happened to load first.
             _OCR["obj"] = easyocr.Reader(langs, gpu=bool(p.get("gpu", False)))
-            _OCR["engine"] = "easyocr"
+            _OCR["engine"] = key
         res = _OCR["obj"].readtext(crop)
         if not res:
             return "", 0.0, dbg
@@ -501,12 +532,73 @@ def task_ocr(crop, roi):
 
 PLATE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
+# Thai consonants, which is what a Thai registration row is written in. A Thai
+# plate carries no Latin letters and no vowels or tone marks, so the alphabet is
+# the consonants plus digits and nothing else.
+THAI_CONSONANTS = "กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ"
+THAI_PLATE_CHARS = THAI_CONSONANTS + "0123456789"
+
+# A camera sees Thai digits on some older plates and on temporary ones. These
+# are not a guess about what the character might be, they are the same digit
+# written another way, so they are normalised before anything else happens.
+THAI_DIGITS = {"๐": "0", "๑": "1", "๒": "2", "๓": "3", "๔": "4",
+               "๕": "5", "๖": "6", "๗": "7", "๘": "8", "๙": "9"}
+
 # Characters OCR confuses when it cannot tell a letter slot from a digit slot.
 # Only tried when the ROI carries a "pattern", so a swap is either confirmed by
 # the plate format or not made at all.
 PLATE_SWAPS = {"O": "0", "D": "0", "Q": "0", "I": "1", "L": "1", "Z": "2",
                "S": "5", "B": "8", "G": "6",
                "0": "O", "1": "I", "2": "Z", "5": "S", "8": "B", "6": "G"}
+
+# Thai consonants that differ by a loop, a tail or a single stroke, which is
+# what survives a 30 px plate and a wet lens. Starting list, not a finished one:
+# which pairs actually get confused depends on the plate font and your camera,
+# so add to it from your own misreads rather than trusting this as complete.
+# Same rule as above — a swap is only ever accepted if the format then fits.
+THAI_PLATE_SWAPS = {
+    "ก": ["ถ", "ภ"], "ถ": ["ก", "ภ"], "ภ": ["ก", "ถ"],
+    "ค": ["ด", "ต", "ก"], "ด": ["ค", "ต"], "ต": ["ค", "ด"],
+    "ข": ["ช", "ฃ"], "ช": ["ข", "ซ"], "ซ": ["ช"], "ฃ": ["ข"],
+    "บ": ["ป", "ษ"], "ป": ["บ"], "ษ": ["บ"],
+    "พ": ["ฟ", "ผ"], "ฟ": ["พ"], "ผ": ["ฝ", "พ"], "ฝ": ["ผ"],
+    "ร": ["ธ"], "ธ": ["ร"],
+    "ม": ["น"], "น": ["ม", "น"],
+    "ท": ["ฑ"], "ฑ": ["ท"],
+    "ฎ": ["ฏ", "ฐ"], "ฏ": ["ฎ"], "ฐ": ["ฎ"],
+    "ว": ["ร"], "ย": ["ฆ"], "ฆ": ["ย"],
+}
+
+
+def plate_alphabet(p):
+    """The characters this ROI's plates are written in.
+
+    An explicit "whitelist" always wins. Otherwise the language decides, so a
+    Thai ROI does not have to repeat the Thai consonants in every config: set
+    "lang": "tha+eng" and the alphabet follows.
+    """
+    wl = p.get("whitelist")
+    if wl:
+        return wl
+    lang = (p.get("lang") or "").lower().replace("-", "_")
+    parts = [x.strip() for x in lang.split("+")]
+    if "tha" in parts or "th" in parts:
+        return THAI_PLATE_CHARS
+    return PLATE_CHARS
+
+
+def plate_swaps_for(alphabet):
+    """Confusable pairs that are actually spellable in this alphabet."""
+    table = {}
+    chars = set(alphabet)
+    for src, alts in list(PLATE_SWAPS.items()) + list(THAI_PLATE_SWAPS.items()):
+        if src not in chars:
+            continue
+        opts = [alts] if isinstance(alts, str) else list(alts)
+        opts = [a for a in opts if a in chars]
+        if opts:
+            table.setdefault(src, []).extend(opts)
+    return table
 
 
 def plate_prep(crop, p):
@@ -551,12 +643,28 @@ def plate_clean(text, p):
     when the frame does not contain something that looks like a plate: a wrong
     plate number in a gate log is worse than no plate number.
     """
-    keep = set(p.get("whitelist") or PLATE_CHARS)
-    raw = (text or "").upper()
+    alphabet = plate_alphabet(p)
+    keep = set(alphabet)
+    raw = "".join(THAI_DIGITS.get(ch, ch) for ch in (text or "")).upper()
     if p.get("keep_spaces"):
         keep.add(" ")
     s = "".join(ch for ch in raw if ch in keep)
     s = " ".join(s.split())
+
+    # Script mismatch is a configuration error, not a bad frame, and it is the
+    # one case where filtering produces a plausible-looking wrong answer: a Thai
+    # plate read by a Latin ROI loses its two letters and returns the digits
+    # alone, which is a valid-looking plate that belongs to a different vehicle.
+    # Refuse, and say which setting is wrong.
+    seen_thai = any(ch in THAI_CONSONANTS for ch in raw)
+    if seen_thai and not any(ch in THAI_CONSONANTS for ch in keep):
+        return "", ("Thai characters were read but this ROI's alphabet is Latin "
+                    "- set \"lang\" to \"tha+eng\"")
+    if not seen_thai and any(ch in THAI_CONSONANTS for ch in keep) \
+            and any(ch.isascii() and ch.isalpha() for ch in raw):
+        return "", ("Latin letters were read but this ROI's alphabet is Thai "
+                    "- check \"lang\" and \"whitelist\"")
+
     lo, hi = int(p.get("min_chars", 4)), int(p.get("max_chars", 12))
     if len(s.replace(" ", "")) < lo:
         return "", "too few characters"
@@ -574,13 +682,12 @@ def plate_clean(text, p):
     if rx.match(s):
         return s, ""
     # one confusable character at a time, accepted only if the format then fits
+    swaps = plate_swaps_for(alphabet)
     for i, ch in enumerate(s):
-        alt = PLATE_SWAPS.get(ch)
-        if not alt:
-            continue
-        cand = s[:i] + alt + s[i + 1:]
-        if rx.match(cand):
-            return cand, ""
+        for alt in swaps.get(ch, ()):
+            cand = s[:i] + alt + s[i + 1:]
+            if rx.match(cand):
+                return cand, ""
     return "", "does not match the plate format"
 
 
@@ -590,10 +697,14 @@ def task_plate(crop, roi):
     dbg = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     sub = dict(p)
     sub.setdefault("psm", 7)               # one line of text, which a plate is
-    sub.setdefault("whitelist", PLATE_CHARS)
+    # One alphabet for both halves of the job. Deriving it once and handing the
+    # same value to the reader and the cleaner is what stops a Thai ROI reading
+    # the plate correctly and then having every Thai character filtered out
+    # again by a Latin default on the way back.
+    sub["whitelist"] = plate_alphabet(p)
     sub["preprocess"] = False              # already done, and better, above
     text, conf, _ = task_ocr(img, {"params": sub})
-    plate, reason = plate_clean(text, p)
+    plate, reason = plate_clean(text, sub)
     if not plate:
         return "", 0.0, dbg
     return plate, conf, dbg

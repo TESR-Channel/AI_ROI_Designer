@@ -58,8 +58,15 @@ if command -v tesseract >/dev/null 2>&1; then
   run "plate config" python3 -I runner/tesr_vision_runner.py \
     --config examples/plate_config.json --image examples/plate.jpg \
     --once --headless
+  # The Thai config against the Latin sample plate. It must load, run and
+  # report nothing: the ROI is set to the Thai alphabet and the plate in the
+  # picture is not Thai, so a refusal is the right answer, not a failure.
+  run "thai plate config" python3 -I runner/tesr_vision_runner.py \
+    --config examples/plate_config_th.json --image examples/plate.jpg \
+    --once --headless
 else
   skip_msg "plate config" "tesseract is not installed"
+  skip_msg "thai plate config" "tesseract is not installed"
 fi
 
 # the page itself: boots without an error, both languages complete, plate logic

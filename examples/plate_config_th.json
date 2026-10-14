@@ -1,0 +1,53 @@
+{
+  "schema": "tesr.roi.v1",
+  "project": "Thai Licence Plate Reader",
+  "runtime": {
+    "loop_fps": 5,
+    "show_window": false,
+    "print_console": true,
+    "console": "summary"
+  },
+  "cameras": [
+    {
+      "id": "gate",
+      "name": "Front Gate",
+      "source": "0",
+      "width": 1280,
+      "height": 720,
+      "rotate": 0,
+      "rois": [
+        {
+          "id": "plate_th",
+          "name": "plate",
+          "enabled": true,
+          "task": "plate_ocr",
+          "output_key": "plate",
+          "stable_frames": 3,
+          "every_n_frames": 1,
+          "upscale_to": 240,
+          "rect": {
+            "x": 0.34,
+            "y": 0.46,
+            "w": 0.32,
+            "h": 0.10,
+            "angle": 0
+          },
+          "params": {
+            "engine": "tesseract",
+            "lang": "tha+eng",
+            "psm": 7,
+            "pattern": "^[0-9]?[ก-ฮ]{1,2}[0-9]{1,4}$",
+            "min_chars": 3,
+            "max_chars": 8,
+            "plate_height": 120,
+            "clahe": true,
+            "denoise": true,
+            "preprocess": true,
+            "invert": false
+          }
+        }
+      ]
+    }
+  ],
+  "_note": "Thai private car plates. Draw the ROI around the REGISTRATION ROW ONLY - the two Thai consonants and the number - and leave the province name underneath outside the box; it is a second line of text and it will wreck a single-line read. Format is one optional leading digit, one or two Thai consonants, then 1 to 4 digits with no leading zeros: 'กข 1234' and '1กข 1234' are both valid, which is what the pattern allows. min_chars is 3 because 'กข 1' is a legal plate. No \"whitelist\" is set on purpose: lang 'tha+eng' selects the Thai consonant alphabet automatically. Needs the Thai language pack - 'sudo apt install tesseract-ocr-tha' on Debian and Raspberry Pi OS - or engine 'easyocr', which downloads its own Thai model on first use. Motorcycle plates put the series, the province and the number on three separate rows: draw a separate ROI for the top and bottom rows rather than one box around both."
+}
