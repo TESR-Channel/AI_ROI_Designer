@@ -232,6 +232,27 @@ A value is only published once it has read the same result `stable_frames` times
 
 ---
 
+## 6.1 Adding your own code
+
+You do not rewrite the runner. Settings — cameras, ROIs, thresholds, MQTT, logging — all live in `config.json`, and the web tool writes that file for you. What the runner cannot know is what *your* system wants done with a reading: publish it somewhere of your own, pull a relay, write a row to your database, apply a business rule.
+
+That goes in the two hooks at the top of `tesr_vision_runner.py`, under the `YOUR CODE GOES HERE` banner:
+
+* `on_result(rec, changed)` — called once for every reading that gets published. `changed` is `True` only when the value differs from the last one, so use it when you want to act on a transition rather than on every frame.
+* `on_event(rec)` — called for events rather than values, such as a shift or daily counter rolling over.
+
+`rec` is the same dictionary that goes to the CSV, the JSONL file and MQTT: `time`, `project`, `camera`, `roi`, `key`, `value`, `conf`.
+
+```python
+def on_result(rec, changed):
+    if changed and rec["key"] == "line_count" and rec["value"] > 100:
+        print("target reached:", rec["value"])
+```
+
+Both hooks run last, after the console, the log files, MQTT and the webhook, and each one is wrapped in its own `try/except`. If your code raises, you get a `[WARN]` line and the vision loop keeps running — so an experiment in here cannot take the station down. Leave them empty and the runner behaves exactly as it did before.
+
+---
+
 ## 6.3 QR and barcode reading
 
 Works out of the box on both sides. **Nothing to install, no internet required.**

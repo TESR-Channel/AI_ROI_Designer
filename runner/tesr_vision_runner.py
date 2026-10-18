@@ -59,6 +59,29 @@ try:
 except ImportError:  # pragma: no cover
     LINE = None
 
+# ---------------------------------------------------------------------------
+#  YOUR CODE GOES HERE
+#
+#  Every value the runner reads passes through on_result().
+#  Every event (a shift rollover, for example) passes through on_event().
+#  Add what you need and leave the rest of the file alone.
+#
+#  rec = {"time": ..., "project": ..., "camera": ..., "roi": ...,
+#         "key": ..., "value": ..., "conf": ...}
+#  `changed` is True only when the value is different from the last one.
+# ---------------------------------------------------------------------------
+
+
+def on_result(rec, changed):
+    """Called once per published reading. Edit freely."""
+    pass
+
+
+def on_event(rec):
+    """Called for events such as a counter period ending. Edit freely."""
+    pass
+
+
 # --------------------------------------------------------------------------
 # small helpers
 # --------------------------------------------------------------------------
@@ -1317,6 +1340,11 @@ class OutputBus:
         wh = self.rt.get("webhook") or {}
         if wh.get("enabled") and wh.get("url") and changed:
             self._post(wh["url"], rec)
+        # the student hook runs last, and a mistake in it must not stop the loop
+        try:
+            on_result(rec, changed)
+        except Exception as exc:
+            log("on_result() failed: %s" % exc, "WARN")
 
     def publish_event(self, name, payload, echo=True):
         """A thing that happened rather than a value that was read.
@@ -1348,6 +1376,11 @@ class OutputBus:
         wh = self.rt.get("webhook") or {}
         if wh.get("enabled") and wh.get("url"):
             self._post(wh["url"], rec)
+        # the student hook runs last, and a mistake in it must not stop the loop
+        try:
+            on_event(rec)
+        except Exception as exc:
+            log("on_event() failed: %s" % exc, "WARN")
 
     @staticmethod
     def _post(url, rec):
