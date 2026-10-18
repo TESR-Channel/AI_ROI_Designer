@@ -1214,6 +1214,199 @@ def task_color(crop, roi):
         cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
 
+# --------------------------------------------------------------------------
+# task 7 : analogue needle gauge
+# --------------------------------------------------------------------------
+#
+# The dial equivalent of level_line: a geometric reading - here an angle rather
+# than a position along a line - turned into engineering units by two reference
+# points the user supplies. On a tank you give the value at each end of the
+# line; on a dial you give the value at each end of the sweep.
+#
+# How the needle is found, in one sentence: sweep a ray out from the hub in
+# every direction and keep the direction in which dark pixels run furthest.
+# A needle is the only mark on a dial that is both long and joined to the hub,
+# so the tick marks and the printed numbers near the rim never win - they are
+# not connected to the centre. No model, no Hough transform, nothing to tune
+# beyond a threshold and how long a needle has to be before it is believed.
+
+_GAUGE_STEP = 0.5     # degrees per ray; 720 rays round the dial
+_GAUGE_GAP = 2        # samples of background a ray may cross and still continue
+_GAUGE_OPP = 50       # rays either side of "straight across" when the pointer
+                      # is the short end of a counterweighted needle (+/- 25 deg)
+
+
+def gauge_reach(mask, cx, cy, radius, inner, outer):
+    """For every direction, how far out from the hub the needle pixels run.
+
+    Returns an array of 720 reaches, each a fraction of `radius`, and the step
+    in degrees between them. Vectorised because a Raspberry Pi should not be
+    asked to walk 720 rays in a Python loop every frame.
+    """
+    h, w = mask.shape[:2]
+    r0 = max(1.0, inner * radius)
+    r1 = max(r0 + 1.0, outer * radius)
+    steps = np.arange(r0, r1 + 1.0, 1.0)                   # one sample per pixel
+    ang = np.radians(np.arange(0.0, 360.0, _GAUGE_STEP))
+    # screen y grows downwards, so sin is negated: 90 degrees points up
+    xs = np.clip(np.rint(cx + np.cos(ang)[:, None] * steps[None, :]), 0, w - 1).astype(np.intp)
+    ys = np.clip(np.rint(cy - np.sin(ang)[:, None] * steps[None, :]), 0, h - 1).astype(np.intp)
+    hit = mask[ys, xs]                                     # (rays, samples) bool
+
+    # A ray stops at the first run of _GAUGE_GAP+1 background samples: that is
+    # where the needle ended. Anything beyond it belongs to some other mark.
+    miss = ~hit
+    n = miss.shape[1]
+    if n > _GAUGE_GAP:
+        trip = miss[:, _GAUGE_GAP:].copy()
+        for k in range(1, _GAUGE_GAP + 1):
+            trip &= miss[:, _GAUGE_GAP - k:n - k]
+        first = np.where(trip.any(axis=1), trip.argmax(axis=1), n)
+    else:
+        first = np.full(miss.shape[0], n)
+    limit = first[:, None]                                 # samples before the gap
+    idx = np.arange(n)[None, :]
+    best = np.where(hit & (idx < limit), idx, -1).max(axis=1)
+    reach = np.where(best >= 0, (r0 + best) / radius, 0.0)
+    return reach, _GAUGE_STEP
+
+
+def gauge_angle(reach, step, around=None):
+    """The direction of the needle, in degrees, 0 = right and anticlockwise up.
+
+    The needle is several rays wide, so the answer is the weighted mean of the
+    one run of rays around the winner - one run, not every ray that scores
+    well, or a needle with a tail would be averaged with its own back end.
+
+    `around` restricts the search to a window of rays, which is how the back
+    end of a counterweighted needle is measured: look opposite the front one.
+    """
+    n = len(reach)
+    if around is None:
+        i = int(np.argmax(reach))
+    else:
+        win = (np.arange(around - _GAUGE_OPP, around + _GAUGE_OPP + 1)) % n
+        i = int(win[int(np.argmax(reach[win]))])
+    top = float(reach[i])
+    if top <= 0.0:
+        return None, 0.0, 0.0
+    edge = top * 0.9
+    half = n // 4                      # never let one run swallow the dial
+    lo = i
+    while reach[(lo - 1) % n] >= edge and i - lo < half:
+        lo -= 1
+    hi = i
+    while reach[(hi + 1) % n] >= edge and hi - i < half:
+        hi += 1
+    run = np.arange(lo, hi + 1) % n
+    wgt = reach[run]
+    rad = np.radians(run * step)
+    theta = float(np.degrees(np.arctan2(np.sum(wgt * np.sin(rad)),
+                                        np.sum(wgt * np.cos(rad))))) % 360.0
+
+    # Confidence: how far the winning run stands above the rest of the dial.
+    rest = np.delete(reach, run)
+    base = float(np.percentile(rest, 90)) if rest.size else 0.0
+    conf = float(np.clip((top - base) / max(top, 1e-6), 0.0, 1.0))
+    return theta, top, conf
+
+
+def gauge_fraction(theta, a0, a1):
+    """Where an angle falls along a sweep that runs from a0 to a1.
+
+    0.0 at a0, 1.0 at a1, and the direction follows from the two numbers: the
+    usual 225 -> -45 runs clockwise, a gauge written -45 -> 225 runs the other
+    way, and neither needs a separate setting. Outside the sweep - the dead
+    sector under the hub - the result goes below 0 or above 1, so the caller
+    can clamp it or refuse it.
+    """
+    span = float(a1) - float(a0)
+    if abs(span) < 1e-6:
+        return None
+    direction = 1.0 if span > 0 else -1.0
+    travel = ((float(theta) - float(a0)) * direction) % 360.0   # 0 .. 360
+    reach = abs(span)
+    if travel <= reach:
+        return travel / reach
+    # past one end or short of the other: whichever is nearer
+    over, under = travel - reach, 360.0 - travel
+    return (1.0 + over / reach) if over <= under else (-under / reach)
+
+
+def task_gauge(crop, roi):
+    """Read an analogue needle gauge inside a rectangular ROI."""
+    p = roi.get("params") or {}
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    h, w = gray.shape[:2]
+
+    cx = float(p.get("center_x", 0.5)) * w
+    cy = float(p.get("center_y", 0.5)) * h
+    # the largest circle around that centre that still fits inside the crop
+    radius = float(min(cx, w - cx, cy, h - cy))
+    if radius < 8.0:
+        return None, 0.0, crop.copy()
+
+    if str(p.get("threshold_mode", "otsu")) == "otsu":
+        th, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        th = float(th)
+    else:
+        th = float(p.get("threshold", 128))
+    dark = str(p.get("needle", "dark")) != "light"
+    mask = (gray < th) if dark else (gray > th)
+
+    inner = float(p.get("scan_inner", 0.12))
+    outer = float(p.get("scan_outer", 0.92))
+    dbg = cv2.cvtColor((mask * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+    draw_mark(dbg, int(round(cx)), int(round(cy)), 6)
+
+    # A dial where most of the face is needle-coloured means the threshold is
+    # wrong, or this is not a dial at all. Either way there is nothing to read.
+    ys, xs = np.mgrid[0:h, 0:w]
+    dist = np.hypot(xs - cx, ys - cy)
+    ring = (dist >= inner * radius) & (dist <= outer * radius)
+    face = int(np.count_nonzero(ring))
+    fill = float(np.count_nonzero(mask & ring)) / max(1, face)
+    if fill > float(p.get("max_fill", 0.35)):
+        return None, 0.0, dbg
+
+    reach, step = gauge_reach(mask, cx, cy, radius, inner, outer)
+    theta, length, conf = gauge_angle(reach, step)
+    if theta is None:
+        return None, 0.0, dbg
+    # A counterweighted needle has a back end as long as the pointer, sometimes
+    # longer. "long" believes the longest mark joined to the hub; "short" reads
+    # the other end of the same needle, straight across the dial.
+    if str(p.get("pointer", "long")) == "short":
+        opp = int(round(((theta + 180.0) % 360.0) / step))
+        theta, length, _ = gauge_angle(reach, step, around=opp)
+        if theta is None:
+            return None, 0.0, dbg
+        # the confidence stays the one measured for the needle as a whole: the
+        # back end is shorter by design, and scoring it against its own front
+        # end would read as "unsure" on every gauge built this way
+    if length < float(p.get("min_length", 0.35)):
+        return None, 0.0, dbg
+
+    frac = gauge_fraction(theta, p.get("min_angle", 225.0), p.get("max_angle", -45.0))
+    if frac is None:
+        return None, 0.0, dbg
+    if frac < -0.02 or frac > 1.02:
+        if not p.get("clamp", True):
+            return None, 0.0, dbg            # the needle is off the scale
+    frac = float(np.clip(frac, 0.0, 1.0))
+
+    v0 = float(p.get("min_value", 0.0))
+    v1 = float(p.get("max_value", 100.0))
+    value = round(v0 + (v1 - v0) * frac, int(p.get("decimals", 1)))
+
+    rad = np.radians(theta)
+    cv2.line(dbg, (int(round(cx)), int(round(cy))),
+             (int(round(cx + np.cos(rad) * length * radius)),
+              int(round(cy - np.sin(rad) * length * radius))), TESR_RED, 2, cv2.LINE_AA)
+    return value, conf, dbg
+
+
 # Tasks that measure or count across the whole frame rather than inside a crop.
 # A counting line only means anything in the coordinates it was drawn on, so
 # these receive the frame itself plus a context carrying the camera scale.
@@ -1258,6 +1451,7 @@ TASKS = {
     "barcode_qr": task_code,
     "presence_diff": task_presence,
     "color_check": task_color,
+    "gauge_needle": task_gauge,
 }
 
 
@@ -1528,6 +1722,7 @@ TASK_COLOUR = {
     "barcode_qr": (224, 211, 127),   # #7FD3E0
     "presence_diff": (127, 201, 134),  # #86C97F
     "color_check": (216, 155, 200),  # #C89BD8
+    "gauge_needle": (90, 190, 224),  # #E0BE5A
     "level_line": (224, 180, 90),    # water blue-gold
     "measure_line": TESR_GOLD,
     "line_count": (110, 220, 250),   # counting gate

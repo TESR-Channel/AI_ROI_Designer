@@ -90,8 +90,9 @@ whenReady(() => {
 
   console.log("\n--- every task is complete ---");
   const tasks = Object.keys(TASKS);
-  check("task list", tasks.length, 12);
+  check("task list", tasks.length, 13);
   check("plate task registered", tasks.includes("plate_ocr"), true);
+  check("gauge task registered", tasks.includes("gauge_needle"), true);
   check("every task has a label in both languages",
         tasks.filter(k => !I18N.th["task_" + k] || !I18N.en["task_" + k]), []);
   check("every task has a hint in both languages",
@@ -116,6 +117,27 @@ whenReady(() => {
   check("a broken pattern does not block the read",
         pc("AB1234", { pattern: "([unclosed" }).plate, "AB1234");
   check("a rejection carries a reason", pc("ABCDEF", sq).reason.length > 0, true);
+
+  console.log("\n--- gauge calibration matches the runner ---");
+  // gauge_fraction() in tesr_vision_runner.py, same cases, same answers: the
+  // sweep direction has to come out of the two reference angles alone.
+  const gf = G("gaugeFraction"), r3 = x => x === null ? null : +x.toFixed(3);
+  check("clockwise 225 -> -45, needle at the low end", r3(gf(225, 225, -45)), 0);
+  check("clockwise 225 -> -45, needle straight up", r3(gf(90, 225, -45)), 0.5);
+  check("clockwise 225 -> -45, needle at the high end", r3(gf(315, 225, -45)), 1);
+  check("anticlockwise -45 -> 225, needle straight up", r3(gf(90, -45, 225)), 0.5);
+  check("anticlockwise -45 -> 225, needle at 135", r3(gf(135, -45, 225)), 0.667);
+  check("dead sector below the hub is off the scale",
+        gf(270, 225, -45) > 1 || gf(270, 225, -45) < 0, true);
+  check("two identical reference angles are refused", gf(90, 90, 90), null);
+
+  // the needle is several rays wide: the answer is the middle of the one run
+  const ga = G("gaugeAngle"), STEP = G("GAUGE_STEP");
+  const reach = win.eval("new Float64Array(" + Math.round(360 / STEP) + ")");
+  for (let k = -3; k <= 3; k++) reach[Math.round(90 / STEP) + k] = 0.8;
+  check("a needle seven rays wide reads as its middle",
+        +ga(reach).theta.toFixed(2), 90);
+  check("an empty dial has no needle", ga(new win.Float64Array(720)), null);
 
   console.log("\n--- counter reset settings ---");
   const cr = G("state").runtime.counter_reset;
@@ -144,6 +166,8 @@ whenReady(() => {
   }
   check("exported runner carries the plate task",
         win.document.getElementById("runnerSrc").textContent.includes('"plate_ocr": task_plate'), true);
+  check("exported runner carries the gauge task",
+        win.document.getElementById("runnerSrc").textContent.includes('"gauge_needle": task_gauge'), true);
   check("exported engine carries the period clock",
         win.document.getElementById("lineSrc").textContent.includes("class PeriodClock"), true);
 

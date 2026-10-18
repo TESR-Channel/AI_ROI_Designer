@@ -119,6 +119,7 @@ Preprocessing (letterbox) and decoding (NMS) are written to match on both sides 
 | `barcode_qr` | Read QR codes and linear barcodes | No — decoders are bundled on both sides |
 | `presence_diff` | Detect a change or the presence of something | No |
 | `color_check` | Check a status lamp, a tower light or part colour | No |
+| `gauge_needle` | Read an analogue needle gauge — pressure, temperature, flow | No — pure OpenCV |
 
 Each ROI has its own `output_key`, so one frame can publish several values at once.
 
@@ -699,6 +700,83 @@ a full ANPR system: it does not find the plate in the frame for you, and it does
 car across frames. For a moving vehicle, put a detector model on the camera, use a counting
 line to decide when the car is in position, and read the plate from a ROI covering that spot —
 or train a plate-detector model and crop from its box.
+
+---
+
+## 6.9 Reading an analogue needle gauge
+
+Plenty of machines still have a round dial and no output of any kind. `gauge_needle` reads one
+with a rectangular ROI, no model and no training — the dial equivalent of `level_line`, with an
+angle in place of a position along a line.
+
+**Draw the ROI square around the dial face.** Not the bezel, not the pipework: the painted face,
+as tight as you can get it while still containing the whole needle sweep. The task works in a
+circle that fits inside the box, so a box much larger than the dial wastes radius and a box that
+clips the needle loses it.
+
+**Then give it two reference angles.** Exactly like `Value at A` / `Value at B` on a tank:
+
+| Setting | Means |
+|---|---|
+| `min_angle` / `min_value` | Where the first tick sits, and what it reads |
+| `max_angle` / `max_value` | Where the last tick sits, and what it reads |
+
+Angles are in degrees, **0° points right and the angle grows anticlockwise** — so 90° is straight
+up, 180° is left, 225° is bottom-left and −45° is bottom-right. Most gauges sweep clockwise from
+about 225° round to about −45°, which is the default, and most of the time the only two numbers
+you change are `min_value` and `max_value`. The sweep direction is not a separate setting: it
+falls out of the two angles. A gauge that runs the other way is written `min_angle: -45`,
+`max_angle: 225`, and nothing else changes.
+
+The dial centre is `center_x` / `center_y`, as a fraction of the ROI, defaulting to the middle of
+the box. It has to sit on the pin the needle turns about. Get it slightly wrong and every reading
+shifts; get it badly wrong and the task stops reporting, because the rays it casts no longer run
+along the needle.
+
+### How it finds the needle
+
+It sweeps a ray out from the hub in every direction and keeps the direction in which
+needle-coloured pixels run furthest from the centre. A needle is the only mark on a dial that is
+both long and joined to the hub, so tick marks, printed numbers and a painted warning band near
+the rim never win — none of them touches the middle. That is the whole method: no model, no
+training, one threshold and one minimum length.
+
+| Setting | Default | What it is for |
+|---|---|---|
+| `threshold_mode` / `threshold` | `otsu` / 128 | `otsu` picks the split between needle and face automatically. Switch to `fixed` when the light on the dial changes through the day and you want the same number every time |
+| `needle` | `dark` | A dark needle on a light face, or `light` for the reverse |
+| `pointer` | `long` | Which end of the needle to read. Some gauges carry a counterweight tail longer than the pointer; if the reading comes out half a turn wrong, switch to `short` |
+| `min_length` | 0.35 | How far a mark must reach, as a fraction of the dial radius, before it is believed to be the needle |
+| `scan_inner` / `scan_outer` | 0.12 / 0.92 | The band of radius that is searched. Raise `scan_inner` past a large hub; lower `scan_outer` inside a crowded tick ring |
+| `max_fill` | 0.35 | If more of the face than this is needle-coloured, the threshold is wrong or this is not a dial, and nothing is reported |
+| `clamp` | `true` | What to do when the needle points into the dead sector below the hub: round to the nearer end of the scale, or report nothing |
+| `unit` / `decimals` | `""` / 1 | Rounding, and the unit shown in the preview. The published value is the bare number, so CSV and MQTT stay numeric |
+
+### When it cannot find the needle
+
+It reports **nothing at all** — no last value, no zero, no guess. The ROI shows `—`, the console
+line shows `-`, and no row is written. That happens when the needle is shorter than `min_length`,
+when too much of the face is needle-coloured, when the ROI is too small to hold a dial, and, with
+`clamp` off, when the needle points outside the scale. A gap in a log is a fact you can act on; a
+plausible wrong pressure is not.
+
+### Calibrating it in the browser
+
+Draw the ROI, pick `gauge_needle`, and press **Test now**. The preview draws two gold spokes at
+`min_angle` and `max_angle` and a red one on the needle it found. Nudge the two angles until the
+gold spokes lie along the first and last tick of the printed scale, type the values those ticks
+read, and the red spoke tells you the rest. The browser and `tesr_vision_runner.py` use the same
+method, so what you read in the preview is what the deployed runner reads.
+
+Raise `stable_frames` for a needle that trembles — a reading has to repeat that many frames
+before it is published, exactly as for every other task.
+
+> Stated plainly for customers: the only figure this project quotes for the gauge reader is the
+> one `tests/gauge_test.py` asserts on dials it draws itself, where the needle angle is known
+> exactly. A real gauge has curved glass, a reflection of the window, a needle that sits a few
+> millimetres above the face and a camera that is never quite square to it. What the reader
+> achieves on a real installation has to be established by comparing it against the dial, on
+> site, over a shift.
 
 ---
 

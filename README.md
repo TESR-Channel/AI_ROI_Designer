@@ -30,6 +30,7 @@ Point a camera at a machine, a tank, a doorway or a conveyor, mark what you care
 | Box | `barcode_qr` | QR, Code 128, Code 39, EAN-13, UPC-A, EAN-8, ITF | No |
 | Box | `color_check` | Tower light, status lamp, part colour | No |
 | Box | `presence_diff` | Something appeared, moved or went missing | No |
+| Box | `gauge_needle` | Analogue needle gauge — pressure, temperature, flow | No |
 | Box | `yolo_detect` / `yolo_classify` | Your own trained model, per region | Yes |
 | Line | `level_line` | Water level in a tank, silo or sight glass | No |
 | Line | `measure_line` | Part width, gap, any dimension in millimetres | No |

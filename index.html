@@ -1692,6 +1692,199 @@ def task_color(crop, roi):
         cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
 
 
+# --------------------------------------------------------------------------
+# task 7 : analogue needle gauge
+# --------------------------------------------------------------------------
+#
+# The dial equivalent of level_line: a geometric reading - here an angle rather
+# than a position along a line - turned into engineering units by two reference
+# points the user supplies. On a tank you give the value at each end of the
+# line; on a dial you give the value at each end of the sweep.
+#
+# How the needle is found, in one sentence: sweep a ray out from the hub in
+# every direction and keep the direction in which dark pixels run furthest.
+# A needle is the only mark on a dial that is both long and joined to the hub,
+# so the tick marks and the printed numbers near the rim never win - they are
+# not connected to the centre. No model, no Hough transform, nothing to tune
+# beyond a threshold and how long a needle has to be before it is believed.
+
+_GAUGE_STEP = 0.5     # degrees per ray; 720 rays round the dial
+_GAUGE_GAP = 2        # samples of background a ray may cross and still continue
+_GAUGE_OPP = 50       # rays either side of "straight across" when the pointer
+                      # is the short end of a counterweighted needle (+/- 25 deg)
+
+
+def gauge_reach(mask, cx, cy, radius, inner, outer):
+    """For every direction, how far out from the hub the needle pixels run.
+
+    Returns an array of 720 reaches, each a fraction of `radius`, and the step
+    in degrees between them. Vectorised because a Raspberry Pi should not be
+    asked to walk 720 rays in a Python loop every frame.
+    """
+    h, w = mask.shape[:2]
+    r0 = max(1.0, inner * radius)
+    r1 = max(r0 + 1.0, outer * radius)
+    steps = np.arange(r0, r1 + 1.0, 1.0)                   # one sample per pixel
+    ang = np.radians(np.arange(0.0, 360.0, _GAUGE_STEP))
+    # screen y grows downwards, so sin is negated: 90 degrees points up
+    xs = np.clip(np.rint(cx + np.cos(ang)[:, None] * steps[None, :]), 0, w - 1).astype(np.intp)
+    ys = np.clip(np.rint(cy - np.sin(ang)[:, None] * steps[None, :]), 0, h - 1).astype(np.intp)
+    hit = mask[ys, xs]                                     # (rays, samples) bool
+
+    # A ray stops at the first run of _GAUGE_GAP+1 background samples: that is
+    # where the needle ended. Anything beyond it belongs to some other mark.
+    miss = ~hit
+    n = miss.shape[1]
+    if n > _GAUGE_GAP:
+        trip = miss[:, _GAUGE_GAP:].copy()
+        for k in range(1, _GAUGE_GAP + 1):
+            trip &= miss[:, _GAUGE_GAP - k:n - k]
+        first = np.where(trip.any(axis=1), trip.argmax(axis=1), n)
+    else:
+        first = np.full(miss.shape[0], n)
+    limit = first[:, None]                                 # samples before the gap
+    idx = np.arange(n)[None, :]
+    best = np.where(hit & (idx < limit), idx, -1).max(axis=1)
+    reach = np.where(best >= 0, (r0 + best) / radius, 0.0)
+    return reach, _GAUGE_STEP
+
+
+def gauge_angle(reach, step, around=None):
+    """The direction of the needle, in degrees, 0 = right and anticlockwise up.
+
+    The needle is several rays wide, so the answer is the weighted mean of the
+    one run of rays around the winner - one run, not every ray that scores
+    well, or a needle with a tail would be averaged with its own back end.
+
+    `around` restricts the search to a window of rays, which is how the back
+    end of a counterweighted needle is measured: look opposite the front one.
+    """
+    n = len(reach)
+    if around is None:
+        i = int(np.argmax(reach))
+    else:
+        win = (np.arange(around - _GAUGE_OPP, around + _GAUGE_OPP + 1)) % n
+        i = int(win[int(np.argmax(reach[win]))])
+    top = float(reach[i])
+    if top <= 0.0:
+        return None, 0.0, 0.0
+    edge = top * 0.9
+    half = n // 4                      # never let one run swallow the dial
+    lo = i
+    while reach[(lo - 1) % n] >= edge and i - lo < half:
+        lo -= 1
+    hi = i
+    while reach[(hi + 1) % n] >= edge and hi - i < half:
+        hi += 1
+    run = np.arange(lo, hi + 1) % n
+    wgt = reach[run]
+    rad = np.radians(run * step)
+    theta = float(np.degrees(np.arctan2(np.sum(wgt * np.sin(rad)),
+                                        np.sum(wgt * np.cos(rad))))) % 360.0
+
+    # Confidence: how far the winning run stands above the rest of the dial.
+    rest = np.delete(reach, run)
+    base = float(np.percentile(rest, 90)) if rest.size else 0.0
+    conf = float(np.clip((top - base) / max(top, 1e-6), 0.0, 1.0))
+    return theta, top, conf
+
+
+def gauge_fraction(theta, a0, a1):
+    """Where an angle falls along a sweep that runs from a0 to a1.
+
+    0.0 at a0, 1.0 at a1, and the direction follows from the two numbers: the
+    usual 225 -> -45 runs clockwise, a gauge written -45 -> 225 runs the other
+    way, and neither needs a separate setting. Outside the sweep - the dead
+    sector under the hub - the result goes below 0 or above 1, so the caller
+    can clamp it or refuse it.
+    """
+    span = float(a1) - float(a0)
+    if abs(span) < 1e-6:
+        return None
+    direction = 1.0 if span > 0 else -1.0
+    travel = ((float(theta) - float(a0)) * direction) % 360.0   # 0 .. 360
+    reach = abs(span)
+    if travel <= reach:
+        return travel / reach
+    # past one end or short of the other: whichever is nearer
+    over, under = travel - reach, 360.0 - travel
+    return (1.0 + over / reach) if over <= under else (-under / reach)
+
+
+def task_gauge(crop, roi):
+    """Read an analogue needle gauge inside a rectangular ROI."""
+    p = roi.get("params") or {}
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    h, w = gray.shape[:2]
+
+    cx = float(p.get("center_x", 0.5)) * w
+    cy = float(p.get("center_y", 0.5)) * h
+    # the largest circle around that centre that still fits inside the crop
+    radius = float(min(cx, w - cx, cy, h - cy))
+    if radius < 8.0:
+        return None, 0.0, crop.copy()
+
+    if str(p.get("threshold_mode", "otsu")) == "otsu":
+        th, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        th = float(th)
+    else:
+        th = float(p.get("threshold", 128))
+    dark = str(p.get("needle", "dark")) != "light"
+    mask = (gray < th) if dark else (gray > th)
+
+    inner = float(p.get("scan_inner", 0.12))
+    outer = float(p.get("scan_outer", 0.92))
+    dbg = cv2.cvtColor((mask * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+    draw_mark(dbg, int(round(cx)), int(round(cy)), 6)
+
+    # A dial where most of the face is needle-coloured means the threshold is
+    # wrong, or this is not a dial at all. Either way there is nothing to read.
+    ys, xs = np.mgrid[0:h, 0:w]
+    dist = np.hypot(xs - cx, ys - cy)
+    ring = (dist >= inner * radius) & (dist <= outer * radius)
+    face = int(np.count_nonzero(ring))
+    fill = float(np.count_nonzero(mask & ring)) / max(1, face)
+    if fill > float(p.get("max_fill", 0.35)):
+        return None, 0.0, dbg
+
+    reach, step = gauge_reach(mask, cx, cy, radius, inner, outer)
+    theta, length, conf = gauge_angle(reach, step)
+    if theta is None:
+        return None, 0.0, dbg
+    # A counterweighted needle has a back end as long as the pointer, sometimes
+    # longer. "long" believes the longest mark joined to the hub; "short" reads
+    # the other end of the same needle, straight across the dial.
+    if str(p.get("pointer", "long")) == "short":
+        opp = int(round(((theta + 180.0) % 360.0) / step))
+        theta, length, _ = gauge_angle(reach, step, around=opp)
+        if theta is None:
+            return None, 0.0, dbg
+        # the confidence stays the one measured for the needle as a whole: the
+        # back end is shorter by design, and scoring it against its own front
+        # end would read as "unsure" on every gauge built this way
+    if length < float(p.get("min_length", 0.35)):
+        return None, 0.0, dbg
+
+    frac = gauge_fraction(theta, p.get("min_angle", 225.0), p.get("max_angle", -45.0))
+    if frac is None:
+        return None, 0.0, dbg
+    if frac < -0.02 or frac > 1.02:
+        if not p.get("clamp", True):
+            return None, 0.0, dbg            # the needle is off the scale
+    frac = float(np.clip(frac, 0.0, 1.0))
+
+    v0 = float(p.get("min_value", 0.0))
+    v1 = float(p.get("max_value", 100.0))
+    value = round(v0 + (v1 - v0) * frac, int(p.get("decimals", 1)))
+
+    rad = np.radians(theta)
+    cv2.line(dbg, (int(round(cx)), int(round(cy))),
+             (int(round(cx + np.cos(rad) * length * radius)),
+              int(round(cy - np.sin(rad) * length * radius))), TESR_RED, 2, cv2.LINE_AA)
+    return value, conf, dbg
+
+
 # Tasks that measure or count across the whole frame rather than inside a crop.
 # A counting line only means anything in the coordinates it was drawn on, so
 # these receive the frame itself plus a context carrying the camera scale.
@@ -1736,6 +1929,7 @@ TASKS = {
     "barcode_qr": task_code,
     "presence_diff": task_presence,
     "color_check": task_color,
+    "gauge_needle": task_gauge,
 }
 
 
@@ -2006,6 +2200,7 @@ TASK_COLOUR = {
     "barcode_qr": (224, 211, 127),   # #7FD3E0
     "presence_diff": (127, 201, 134),  # #86C97F
     "color_check": (216, 155, 200),  # #C89BD8
+    "gauge_needle": (90, 190, 224),  # #E0BE5A
     "level_line": (224, 180, 90),    # water blue-gold
     "measure_line": TESR_GOLD,
     "line_count": (110, 220, 250),   # counting gate
@@ -3472,6 +3667,7 @@ th: {
   task_yolo_detect:"YOLO ตรวจจับวัตถุ", task_yolo_classify:"YOLO จำแนกภาพ",
   task_barcode_qr:"Barcode / QR", task_presence_diff:"ตรวจการเปลี่ยนแปลง / มีของ",
   task_color_check:"ตรวจสี (ไฟสถานะ)",
+  task_gauge_needle:"อ่านเกจเข็ม (หน้าปัดกลม)",
 
   /* task params */
   pDigits:"จำนวนหลักในกรอบนี้", pDecimals:"ทศนิยม",
@@ -3492,6 +3688,21 @@ th: {
   pSensitivity:"Sensitivity", pMinRatio:"min_ratio", pReference:"ภาพอ้างอิง",
   refFirst:"เฟรมแรก", refPrev:"เฟรมก่อนหน้า",
   pOutputAs:"ส่งออกเป็น", outBool:"จริง/เท็จ", outRatio:"สัดส่วนพื้นที่",
+  gCx:"ศูนย์กลาง X", gCy:"ศูนย์กลาง Y",
+  gCentreHint:"<b>จุดศูนย์กลางหน้าปัด</b> — 0.5 / 0.5 คือกลางกรอบพอดี ถ้าวาดกรอบคร่อมหน้าปัดไว้ตรงกลางแล้ว ไม่ต้องแก้<br>จุดนี้ต้องตรงกับแกนหมุนของเข็ม ถ้าเลื่อนผิดเพียงเล็กน้อย ค่าจะเพี้ยนทันที",
+  gMinAngle:"มุมค่าต่ำสุด (°)", gMaxAngle:"มุมค่าสูงสุด (°)",
+  gMinValue:"ค่าที่มุมต่ำสุด", gMaxValue:"ค่าที่มุมสูงสุด",
+  gAngleHint:"<b>สเกลหน้าปัด</b> — มุม 0° คือทิศขวา และเพิ่มทวนเข็มนาฬิกา ดังนั้น 90° = ชี้ขึ้น · 180° = ชี้ซ้าย · 225° = ซ้ายล่าง · −45° = ขวาล่าง<br>เกจทั่วไปกวาด<b>ตามเข็ม</b>จาก 225° ไป −45° ซึ่งเป็นค่าตั้งต้น ถ้าเกจกวาดกลับทาง ให้สลับสองช่องนี้ — ไม่มีสวิตช์ทิศทางแยกต่างหาก",
+  gNeedle:"สีเข็ม", gNeedleDark:"เข็มเข้มบนหน้าปัดสว่าง", gNeedleLight:"เข็มสว่างบนหน้าปัดเข้ม",
+  gPointer:"ปลายที่ใช้อ่าน", gPointerLong:"ด้านที่ยาวกว่า", gPointerShort:"ด้านที่สั้นกว่า",
+  gPointerHint:"เกจบางรุ่นมีหางถ่วงน้ำหนักยาวกว่าปลายเข็มจริง ถ้าอ่านได้กลับด้าน ให้เปลี่ยนเป็น “ด้านที่สั้นกว่า”",
+  gMinLength:"ความยาวเข็มต่ำสุด", gScanInner:"เริ่มสแกนที่รัศมี", gScanOuter:"สิ้นสุดที่รัศมี",
+  gMaxFill:"สัดส่วนมืดสูงสุด", gClamp:"เข็มอยู่นอกสเกล", gClampOn:"ปัดเข้าปลายสเกล",
+  gClampOff:"ไม่รายงานค่า",
+  gGuardHint:"ทุกค่าเป็นสัดส่วนของรัศมีหน้าปัด ถ้าหาเข็มไม่เจอ หรือหน้าปัดมืดเกินเกณฑ์ ระบบจะ<b>ไม่รายงานค่าออกมาเลย</b> ดีกว่าเดาค่าผิดไปบันทึกไว้",
+  gr_small:"กรอบเล็กเกินกว่าจะเป็นหน้าปัด", gr_fill:"ในกรอบมืดเกินไป ลองปรับ threshold",
+  gr_short:"หาเข็มไม่เจอ หรือเข็มสั้นกว่าเกณฑ์", gr_off:"เข็มชี้นอกสเกลที่ตั้งไว้",
+  gr_span:"มุมค่าต่ำสุดกับสูงสุดต้องไม่เท่ากัน",
 
   /* diagnostics */
   accuracyCheck:"ตรวจสอบความแม่นยำ", autoTune:"ปรับอัตโนมัติ", autoTuning:"กำลังไล่ค่า …",
@@ -3550,6 +3761,7 @@ th: {
   hint_barcode_qr:"อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
   hint_presence_diff:"เทียบกับเฟรมอ้างอิง กดสองครั้งเพื่อดูผลการเปลี่ยนแปลง",
   hint_color_check:"นับสัดส่วนพิกเซลที่อยู่ในช่วงสีที่ตั้งไว้",
+  hint_gauge_needle:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือเข็มที่ระบบเจอ เส้นทองคือสองมุมอ้างอิง",
   hint_level_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า ดูแถบภาพและกราฟด้านล่างประกอบ",
   hint_measure_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือขอบที่ระบบเจอ",
   hint_line_count:"การนับต้องใช้การติดตามข้ามหลายเฟรม ทดสอบจริงด้วย Python",
@@ -3699,6 +3911,7 @@ en: {
   task_yolo_detect:"YOLO object detection", task_yolo_classify:"YOLO classification",
   task_barcode_qr:"Barcode / QR", task_presence_diff:"Change / presence detection",
   task_color_check:"Colour check (status lamp)",
+  task_gauge_needle:"Read an analogue needle gauge",
 
   pDigits:"Digits in this ROI", pDecimals:"Decimals",
   digitsHint:"Defaults to <b>1 digit</b> — one ROI per digit copes best with uneven lighting and camera angle. To read a whole reading in one box, set the real digit count, e.g. 4.",
@@ -3718,6 +3931,21 @@ en: {
   pSensitivity:"Sensitivity", pMinRatio:"min_ratio", pReference:"Reference frame",
   refFirst:"First frame", refPrev:"Previous frame",
   pOutputAs:"Output as", outBool:"True/false", outRatio:"Area ratio",
+  gCx:"Centre X", gCy:"Centre Y",
+  gCentreHint:"<b>Centre of the dial</b> — 0.5 / 0.5 is the middle of the ROI. Draw the box square around the dial and you will not need to touch these.<br>This point has to sit on the pin the needle turns about — a small error here shifts every reading.",
+  gMinAngle:"Angle at the low end (°)", gMaxAngle:"Angle at the high end (°)",
+  gMinValue:"Value at the low end", gMaxValue:"Value at the high end",
+  gAngleHint:"<b>The scale on the dial</b> — 0° points right and the angle grows anticlockwise, so 90° = straight up · 180° = left · 225° = bottom-left · −45° = bottom-right.<br>A normal gauge sweeps <b>clockwise</b> from 225° round to −45°, which is the default. For a gauge that runs the other way, swap these two numbers — there is no separate direction switch.",
+  gNeedle:"Needle colour", gNeedleDark:"Dark needle on a light face", gNeedleLight:"Light needle on a dark face",
+  gPointer:"End to read", gPointerLong:"The longer end", gPointerShort:"The shorter end",
+  gPointerHint:"Some gauges have a counterweight tail longer than the pointer itself. If the reading comes out half a turn wrong, switch to “the shorter end”.",
+  gMinLength:"Shortest needle to believe", gScanInner:"Start scanning at radius", gScanOuter:"Stop scanning at radius",
+  gMaxFill:"Most of the face that may be needle-coloured", gClamp:"Needle outside the scale",
+  gClampOn:"Round to the nearest end", gClampOff:"Report nothing",
+  gGuardHint:"All three are fractions of the dial radius. When no needle is found, or the face is darker than the limit, <b>nothing is reported at all</b> — better than a wrong number in the log.",
+  gr_small:"The ROI is too small to hold a dial", gr_fill:"Too much of the face is needle-coloured — check the threshold",
+  gr_short:"No needle found, or it is shorter than the limit", gr_off:"The needle is pointing outside the scale",
+  gr_span:"The two reference angles must be different",
 
   accuracyCheck:"Accuracy check", autoTune:"Auto-tune", autoTuning:"Sweeping …",
   diagnoseOnly:"Diagnose only",
@@ -3774,6 +4002,7 @@ en: {
   hint_barcode_qr:"Built-in QR and barcode reading. Works offline, in every browser.",
   hint_presence_diff:"Compares against a reference frame. Press twice to see a change.",
   hint_color_check:"Counts the share of pixels inside the colour range you set",
+  hint_gauge_needle:"Re-reads instantly as you change values. Red is the needle it found, gold the two reference angles.",
   hint_level_line:"Re-reads instantly as you change values. The strip and graph below show what it sees.",
   hint_measure_line:"Re-reads instantly as you change values. The red marks are the edges it found.",
   hint_line_count:"Counting needs tracking across frames — test it for real with Python.",
@@ -3905,6 +4134,7 @@ const TASKS = {
   barcode_qr:   {color:"#7FD3E0", model:false},
   presence_diff:{color:"#86C97F", model:false},
   color_check:  {color:"#C89BD8", model:false},
+  gauge_needle: {color:"#E0BE5A", model:false},
 };
 const taskLabel = k => t("task_" + k);
 const taskShape = k => (TASKS[k] && TASKS[k].shape) || "rect";
@@ -3938,6 +4168,12 @@ function defaultParams(task){
     case "barcode_qr":   return {qr:true, barcode:true};
     case "presence_diff":return {sensitivity:25, min_ratio:0.05, reference:"first"};
     case "color_check":  return {h_min:0,h_max:10,s_min:120,s_max:255,v_min:80,v_max:255,min_ratio:0.2,output:"bool"};
+    case "gauge_needle": return {center_x:0.5, center_y:0.5,
+                                 min_angle:225, max_angle:-45, min_value:0, max_value:100,
+                                 threshold_mode:"otsu", threshold:128, needle:"dark",
+                                 pointer:"long", min_length:0.35, scan_inner:0.12,
+                                 scan_outer:0.92, max_fill:0.35, clamp:true,
+                                 unit:"", decimals:1};
     default: return {};
   }
 }
@@ -4756,6 +4992,38 @@ function renderTaskParams(r){
     add(rowOf([field("V min", num(p,"v_min",{min:0,max:255})), field("V max", num(p,"v_max",{min:0,max:255}))]));
     add(rowOf([field(t("pMinRatio"), num(p,"min_ratio",{min:0,max:1,step:0.05})),
                field(t("pOutputAs"), sel(p,"output",[["bool",t("outBool")],["ratio",t("outRatio")]]))]));
+  } else if(r.task === "gauge_needle"){
+    const hint = s => { const d = document.createElement("div");
+                        d.className = "hint"; d.innerHTML = t(s); add(d); };
+
+    add(rowOf([field(t("gCx"), num(p,"center_x",{min:0,max:1,step:0.01})),
+               field(t("gCy"), num(p,"center_y",{min:0,max:1,step:0.01}))]));
+    hint("gCentreHint");
+
+    add(rowOf([field(t("gMinAngle"), num(p,"min_angle",{min:-360,max:360,step:1})),
+               field(t("gMinValue"), num(p,"min_value",{step:0.1}))]));
+    add(rowOf([field(t("gMaxAngle"), num(p,"max_angle",{min:-360,max:360,step:1})),
+               field(t("gMaxValue"), num(p,"max_value",{step:0.1}))]));
+    add(rowOf([field(t("pUnit"), txt(p,"unit")),
+               field(t("pDecimals"), num(p,"decimals",{min:0,max:4,step:1}))]));
+    hint("gAngleHint");
+
+    add(rowOf([field(t("pThreshold"), sel(p,"threshold_mode",
+                 [["otsu",t("thrOtsu")],["fixed",t("pThresholdVal")]])),
+               field(t("pThresholdVal"), num(p,"threshold",{min:0,max:255,step:1}))]));
+    add(rowOf([field(t("gNeedle"), sel(p,"needle",
+                 [["dark",t("gNeedleDark")],["light",t("gNeedleLight")]])),
+               field(t("gPointer"), sel(p,"pointer",
+                 [["long",t("gPointerLong")],["short",t("gPointerShort")]]))]));
+    hint("gPointerHint");
+
+    add(rowOf([field(t("gMinLength"), num(p,"min_length",{min:0,max:1,step:0.05})),
+               field(t("gScanInner"), num(p,"scan_inner",{min:0,max:1,step:0.02})),
+               field(t("gScanOuter"), num(p,"scan_outer",{min:0,max:1,step:0.02}))]));
+    add(rowOf([field(t("gMaxFill"), num(p,"max_fill",{min:0,max:1,step:0.05})),
+               field(t("gClamp"), sel(p,"clamp",
+                 [[true,t("gClampOn")],[false,t("gClampOff")]]))]));
+    hint("gGuardHint");
   }
 }
 
@@ -4995,6 +5263,158 @@ function binarizeJS(gray, w, h, p){
   }
   if(p.invert) for(let i = 0; i < out.length; i++) out[i] = 255 - out[i];
   return out;
+}
+
+/* ------------------ analogue needle gauge ------------------
+   The dial twin of the level line: an angle instead of a position along a
+   line, turned into engineering units by two reference points the user gives.
+
+   Finding the needle, in one sentence: sweep a ray out from the hub in every
+   direction and keep the direction in which needle-coloured pixels run
+   furthest. A needle is the only mark on a dial that is both long and joined
+   to the hub, so tick marks, printed numbers and a warning band near the rim
+   never win - none of them touches the centre.
+
+   Same maths as task_gauge() in the Python runner, so what you read here is
+   what the deployed runner reads. */
+const GAUGE_STEP = 0.5;   // degrees per ray; 720 rays round the dial
+const GAUGE_GAP  = 2;     // background samples a ray may cross and continue
+const GAUGE_OPP  = 50;    // rays either side of straight across (+/- 25 deg)
+
+function gaugeReach(mask, w, h, cx, cy, radius, inner, outer){
+  const r0 = Math.max(1, inner * radius), r1 = Math.max(r0 + 1, outer * radius);
+  const ns = Math.floor(r1 - r0) + 1, n = Math.round(360 / GAUGE_STEP);
+  const reach = new Float64Array(n);
+  for(let k = 0; k < n; k++){
+    const a = k * GAUGE_STEP * Math.PI / 180;
+    const ca = Math.cos(a), sa = -Math.sin(a);   // screen y grows downwards
+    let best = -1, miss = 0;
+    for(let s = 0; s < ns; s++){
+      const r = r0 + s;
+      const x = Math.round(cx + ca * r), y = Math.round(cy + sa * r);
+      if(x >= 0 && x < w && y >= 0 && y < h && mask[y*w + x]){ best = s; miss = 0; }
+      else if(++miss > GAUGE_GAP) break;          // the needle ended here
+    }
+    reach[k] = best >= 0 ? (r0 + best) / radius : 0;
+  }
+  return reach;
+}
+
+/* The needle is several rays wide, so the answer is the weighted mean of the
+   one run of rays around the winner - one run, or a needle with a tail would
+   be averaged with its own back end. `around` restricts the search to a
+   window, which is how the back end of a counterweighted needle is measured. */
+function gaugeAngle(reach, around){
+  const n = reach.length, at = k => reach[((k % n) + n) % n];
+  let i = 0;
+  if(around === undefined){
+    for(let k = 1; k < n; k++) if(reach[k] > reach[i]) i = k;
+  } else {
+    i = ((around % n) + n) % n;
+    for(let d = -GAUGE_OPP; d <= GAUGE_OPP; d++)
+      if(at(around + d) > at(i)) i = ((around + d) % n + n) % n;
+  }
+  const top = reach[i];
+  if(top <= 0) return null;
+
+  const edge = top * 0.9, half = Math.floor(n / 4);
+  let lo = i, hi = i;
+  while(at(lo - 1) >= edge && i - lo < half) lo--;
+  while(at(hi + 1) >= edge && hi - i < half) hi++;
+
+  let sx = 0, sy = 0;
+  const inRun = new Set();
+  for(let k = lo; k <= hi; k++){
+    const j = ((k % n) + n) % n, a = j * GAUGE_STEP * Math.PI / 180;
+    sy += reach[j] * Math.sin(a); sx += reach[j] * Math.cos(a);
+    inRun.add(j);
+  }
+  const theta = ((Math.atan2(sy, sx) * 180 / Math.PI) % 360 + 360) % 360;
+
+  // confidence: how far the winning run stands above the rest of the dial
+  const rest = [];
+  for(let k = 0; k < n; k++) if(!inRun.has(k)) rest.push(reach[k]);
+  rest.sort((a, b) => a - b);
+  let base = 0;
+  if(rest.length){                                   // linear-interpolated p90
+    const f = 0.9 * (rest.length - 1), a = Math.floor(f), b = Math.min(rest.length - 1, a + 1);
+    base = rest[a] + (rest[b] - rest[a]) * (f - a);
+  }
+  return {theta, length: top, conf: Math.max(0, Math.min(1, (top - base) / Math.max(top, 1e-6)))};
+}
+
+/* Where an angle falls along a sweep running from a0 to a1: 0 at a0, 1 at a1.
+   The direction follows from the two numbers alone - the usual 225 -> -45 runs
+   clockwise, a gauge written -45 -> 225 runs the other way. Outside the sweep,
+   in the dead sector under the hub, the result goes below 0 or above 1. */
+function gaugeFraction(theta, a0, a1){
+  const span = a1 - a0;
+  if(Math.abs(span) < 1e-6) return null;
+  const dir = span > 0 ? 1 : -1, reach = Math.abs(span);
+  const travel = ((((theta - a0) * dir) % 360) + 360) % 360;
+  if(travel <= reach) return travel / reach;
+  const over = travel - reach, under = 360 - travel;
+  return over <= under ? (1 + over / reach) : (-under / reach);
+}
+
+function readGauge(gray, w, h, p){
+  const g = boxBlur(gray, w, h, 3);
+  const cx = (p.center_x === undefined ? 0.5 : +p.center_x) * w;
+  const cy = (p.center_y === undefined ? 0.5 : +p.center_y) * h;
+  const radius = Math.min(cx, w - cx, cy, h - cy);
+  const out = {value:null, cx, cy, radius};
+  if(!(radius >= 8)) return Object.assign(out, {reason:"small"});
+
+  const th = p.threshold_mode === "fixed" ? (+p.threshold || 128) : otsu(g);
+  const dark = p.needle !== "light";
+  const mask = new Uint8Array(w * h);
+  for(let i = 0; i < mask.length; i++) mask[i] = (dark ? g[i] < th : g[i] > th) ? 1 : 0;
+
+  const inner = p.scan_inner === undefined ? 0.12 : +p.scan_inner;
+  const outer = p.scan_outer === undefined ? 0.92 : +p.scan_outer;
+  out.inner = inner; out.outer = outer;
+
+  // A face that is mostly needle-coloured means the threshold is wrong, or
+  // this is not a dial at all. Either way there is nothing to read.
+  const ri = inner * radius, ro = outer * radius;
+  let face = 0, filled = 0;
+  for(let y = 0; y < h; y++) for(let x = 0; x < w; x++){
+    const d = Math.hypot(x - cx, y - cy);
+    if(d < ri || d > ro) continue;
+    face++; if(mask[y*w + x]) filled++;
+  }
+  const maxFill = p.max_fill === undefined ? 0.35 : +p.max_fill;
+  if(face && filled / face > maxFill) return Object.assign(out, {reason:"fill"});
+
+  const reach = gaugeReach(mask, w, h, cx, cy, radius, inner, outer);
+  let found = gaugeAngle(reach);
+  if(!found) return Object.assign(out, {reason:"short"});
+  let conf = found.conf;
+  if(p.pointer === "short"){
+    // the back end of the same needle, straight across the dial; the
+    // confidence stays the one measured for the needle as a whole
+    const opp = Math.round(((found.theta + 180) % 360) / GAUGE_STEP);
+    found = gaugeAngle(reach, opp);
+    if(!found) return Object.assign(out, {reason:"short"});
+  }
+  const minLen = p.min_length === undefined ? 0.35 : +p.min_length;
+  out.theta = found.theta; out.length = found.length; out.conf = conf;
+  if(found.length < minLen) return Object.assign(out, {reason:"short"});
+
+  const frac0 = gaugeFraction(found.theta, +p.min_angle, +p.max_angle);
+  if(frac0 === null) return Object.assign(out, {reason:"span"});
+  if((frac0 < -0.02 || frac0 > 1.02) && p.clamp === false)
+    return Object.assign(out, {reason:"off"});
+  const frac = Math.max(0, Math.min(1, frac0));
+
+  const v0 = +p.min_value || 0, v1 = p.max_value === undefined ? 100 : +p.max_value;
+  const dec = Math.max(0, Math.min(6, +p.decimals || 0));
+  out.value = +((v0 + (v1 - v0) * frac).toFixed(dec));
+  return out;
+}
+
+function gaugeReason(r){
+  return r && r.reason ? t("gr_" + r.reason) : "";
 }
 
 const SEG_BOXES = [[0.18,0,0.82,0.16],[0,0.10,0.24,0.46],[0.76,0.10,1,0.46],[0.18,0.42,0.82,0.58],
@@ -6412,6 +6832,12 @@ async function evalRoi(roi){
     const ratio = hit / (w*h);
     return {value: p.output === "ratio" ? +ratio.toFixed(3) : (ratio >= p.min_ratio), conf: ratio, crop};
   }
+  if(roi.task === "gauge_needle"){
+    const r = readGauge(grayOf(crop), w, h, roi.params || {});
+    if(r.value === null) return {value:null, conf:0, crop, gauge:r, note:gaugeReason(r)};
+    const u = (roi.params && roi.params.unit) ? " " + roi.params.unit : "";
+    return {value: r.value + u, conf: r.conf || 0, crop, gauge: r};
+  }
   if(roi.task === "presence_diff"){
     const g = grayOf(crop), key = roi.id, ref = prevGray[key];
     if(!ref || ref.length !== g.length){ prevGray[key] = g; return {value:false, conf:0, crop}; }
@@ -6576,6 +7002,7 @@ function updatePreviewNow(){
         g.fillText(d.name + " " + d.conf.toFixed(2), d.box[0]+2, Math.max(11, d.box[1]-3));
       });
     }
+    if(res && res.gauge) drawGaugeOverlay(g, res.gauge, r.params || {});
     P("pvValue").textContent = res && res.value !== null && res.value !== ""
                               ? String(res.value) : "—";
     P("pvConf").textContent = res && res.note ? res.note
@@ -6615,6 +7042,39 @@ P("btnTestRoi").onclick = async () => {
   b.disabled = false; b.textContent = t("testNow");
   updatePreviewNow(); invalidate();
 };
+
+/* The dial, with what the reader actually used drawn on it: the hub it turned
+   about, the band it searched, the two reference angles in gold and the needle
+   it found in red. Seeing the two gold spokes land on the first and last tick
+   is the whole of calibrating a gauge. */
+function drawGaugeOverlay(g, r, p){
+  const spoke = (deg, colour, label) => {
+    const a = deg * Math.PI / 180;
+    g.strokeStyle = colour; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(r.cx, r.cy);
+    g.lineTo(r.cx + Math.cos(a) * r.radius, r.cy - Math.sin(a) * r.radius);
+    g.stroke();
+    if(label){
+      g.fillStyle = colour; g.font = "10px ui-monospace, monospace";
+      g.fillText(label, r.cx + Math.cos(a) * r.radius * 0.86 - 4,
+                        r.cy - Math.sin(a) * r.radius * 0.86);
+    }
+  };
+  const ring = rad => { g.beginPath(); g.arc(r.cx, r.cy, rad, 0, Math.PI * 2); g.stroke(); };
+
+  g.strokeStyle = "rgba(230,204,129,.35)"; g.lineWidth = 1;
+  if(r.inner !== undefined) ring(r.inner * r.radius);
+  if(r.outer !== undefined) ring(r.outer * r.radius);
+
+  spoke(+p.min_angle, "rgba(230,204,129,.85)", String(p.min_value));
+  spoke(+p.max_angle, "rgba(230,204,129,.85)", String(p.max_value));
+  // drawn whenever something was found, even if it was then refused: seeing
+  // what the reader latched onto is how you work out why it said nothing
+  if(r.theta !== undefined) spoke(r.theta, "#F30006", "");
+
+  g.fillStyle = "#F30006";
+  g.beginPath(); g.arc(r.cx, r.cy, 3, 0, Math.PI * 2); g.fill();
+}
 
 /* Show the strip of pixels the line actually sampled, straightened out, with
    the detected positions marked. Seeing the strip is what makes the parameters
