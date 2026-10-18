@@ -186,12 +186,17 @@ real_boundary = LINE.PeriodClock.boundary
 calls = {"n": 0}
 
 
+# Pin the clock rather than reading the wall clock: the run has to start inside
+# the 06:00 shift and end inside the 14:00 one whatever time of day the suite
+# is run at. The real boundary logic still produces both starts and labels.
+BASE = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+
+
 def moving_clock(self, now=None):
     calls["n"] += 1
-    start, label = real_boundary(self, now)
-    if calls["n"] > 18:                      # after the crossing, before the end
-        return start + timedelta(hours=8), label.replace(" A", " B")
-    return start, label
+    # after the crossing, before the end of the run
+    fake = BASE + (timedelta(hours=8) if calls["n"] > 18 else timedelta())
+    return real_boundary(self, fake)
 
 
 LINE.PeriodClock.boundary = moving_clock
