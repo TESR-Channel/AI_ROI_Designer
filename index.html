@@ -1683,9 +1683,27 @@ def task_presence(crop, roi):
 def task_color(crop, roi):
     p = roi.get("params") or {}
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    lo = np.array([int(p.get("h_min", 0)), int(p.get("s_min", 80)), int(p.get("v_min", 80))])
-    hi = np.array([int(p.get("h_max", 179)), int(p.get("s_max", 255)), int(p.get("v_max", 255))])
-    mask = cv2.inRange(hsv, lo, hi)
+    h_min, h_max = int(p.get("h_min", 0)), int(p.get("h_max", 179))
+    s_min, s_max = int(p.get("s_min", 80)), int(p.get("s_max", 255))
+    v_min, v_max = int(p.get("v_min", 80)), int(p.get("v_max", 255))
+
+    # Hue is a CIRCLE, and red sits on the seam: half of red is just above 0
+    # and half just below 179. So when h_min is ABOVE h_max the band runs off
+    # the top and comes back through 0, and it takes two ranges OR-ed
+    # together. A red lamp set to 0-10 alone reads false whenever its hue
+    # lands on the far side of the seam - which is most red lamps, most days.
+    if h_min <= h_max:
+        mask = cv2.inRange(hsv,
+                           np.array([h_min, s_min, v_min]),
+                           np.array([h_max, s_max, v_max]))
+    else:
+        mask = cv2.bitwise_or(
+            cv2.inRange(hsv,
+                        np.array([h_min, s_min, v_min]),
+                        np.array([179, s_max, v_max])),
+            cv2.inRange(hsv,
+                        np.array([0, s_min, v_min]),
+                        np.array([h_max, s_max, v_max])))
     ratio = float(np.count_nonzero(mask)) / mask.size
     ok = ratio >= float(p.get("min_ratio", 0.20))
     return (ok if p.get("output", "bool") == "bool" else round(ratio, 4)), ratio, \
@@ -3760,7 +3778,7 @@ th: {
   hint_yolo_classify:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
   hint_barcode_qr:"อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
   hint_presence_diff:"เทียบกับเฟรมอ้างอิง กดสองครั้งเพื่อดูผลการเปลี่ยนแปลง",
-  hint_color_check:"นับสัดส่วนพิกเซลที่อยู่ในช่วงสีที่ตั้งไว้",
+  hint_color_check:"นับสัดส่วนพิกเซลที่อยู่ในช่วงสีที่ตั้งไว้ — ค่า H เป็นวงกลม ถ้าตั้ง H min สูงกว่า H max จะวนข้ามเลข 0 ซึ่งจำเป็นสำหรับสีแดง (ค่าเริ่มต้นคือ 170–10)",
   hint_gauge_needle:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือเข็มที่ระบบเจอ เส้นทองคือสองมุมอ้างอิง",
   hint_level_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า ดูแถบภาพและกราฟด้านล่างประกอบ",
   hint_measure_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือขอบที่ระบบเจอ",
@@ -4001,7 +4019,7 @@ en: {
   hint_yolo_classify:"Runs the selected .onnx model on this ROI",
   hint_barcode_qr:"Built-in QR and barcode reading. Works offline, in every browser.",
   hint_presence_diff:"Compares against a reference frame. Press twice to see a change.",
-  hint_color_check:"Counts the share of pixels inside the colour range you set",
+  hint_color_check:"Counts the share of pixels inside the colour range you set — hue is a circle, so H min above H max wraps past 0, which is what red needs (the default is 170-10)",
   hint_gauge_needle:"Re-reads instantly as you change values. Red is the needle it found, gold the two reference angles.",
   hint_level_line:"Re-reads instantly as you change values. The strip and graph below show what it sees.",
   hint_measure_line:"Re-reads instantly as you change values. The red marks are the edges it found.",
@@ -4167,7 +4185,7 @@ function defaultParams(task){
     case "yolo_classify":return {};
     case "barcode_qr":   return {qr:true, barcode:true};
     case "presence_diff":return {sensitivity:25, min_ratio:0.05, reference:"first"};
-    case "color_check":  return {h_min:0,h_max:10,s_min:120,s_max:255,v_min:80,v_max:255,min_ratio:0.2,output:"bool"};
+    case "color_check":  return {h_min:170,h_max:10,s_min:120,s_max:255,v_min:80,v_max:255,min_ratio:0.2,output:"bool"};  // red, and red wraps: 170..179 plus 0..10
     case "gauge_needle": return {center_x:0.5, center_y:0.5,
                                  min_angle:225, max_angle:-45, min_value:0, max_value:100,
                                  threshold_mode:"otsu", threshold:128, needle:"dark",
@@ -6827,7 +6845,11 @@ async function evalRoi(roi){
       if(df){ H = mx===R ? 60*(((G-B)/df)%6) : mx===G ? 60*((B-R)/df+2) : 60*((R-G)/df+4); }
       if(H < 0) H += 360;
       const Hc = H/2, S = mx ? df/mx*255 : 0, V = mx*255;
-      if(Hc>=p.h_min && Hc<=p.h_max && S>=p.s_min && S<=p.s_max && V>=p.v_min && V<=p.v_max) hit++;
+      // h_min above h_max means the band wraps past the seam at 0 - see
+      // task_color in the runner. Red needs it; nothing else does.
+      const inH = p.h_min <= p.h_max ? (Hc>=p.h_min && Hc<=p.h_max)
+                                     : (Hc>=p.h_min || Hc<=p.h_max);
+      if(inH && S>=p.s_min && S<=p.s_max && V>=p.v_min && V<=p.v_max) hit++;
     }
     const ratio = hit / (w*h);
     return {value: p.output === "ratio" ? +ratio.toFixed(3) : (ratio >= p.min_ratio), conf: ratio, crop};

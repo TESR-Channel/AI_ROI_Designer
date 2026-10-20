@@ -1205,9 +1205,27 @@ def task_presence(crop, roi):
 def task_color(crop, roi):
     p = roi.get("params") or {}
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    lo = np.array([int(p.get("h_min", 0)), int(p.get("s_min", 80)), int(p.get("v_min", 80))])
-    hi = np.array([int(p.get("h_max", 179)), int(p.get("s_max", 255)), int(p.get("v_max", 255))])
-    mask = cv2.inRange(hsv, lo, hi)
+    h_min, h_max = int(p.get("h_min", 0)), int(p.get("h_max", 179))
+    s_min, s_max = int(p.get("s_min", 80)), int(p.get("s_max", 255))
+    v_min, v_max = int(p.get("v_min", 80)), int(p.get("v_max", 255))
+
+    # Hue is a CIRCLE, and red sits on the seam: half of red is just above 0
+    # and half just below 179. So when h_min is ABOVE h_max the band runs off
+    # the top and comes back through 0, and it takes two ranges OR-ed
+    # together. A red lamp set to 0-10 alone reads false whenever its hue
+    # lands on the far side of the seam - which is most red lamps, most days.
+    if h_min <= h_max:
+        mask = cv2.inRange(hsv,
+                           np.array([h_min, s_min, v_min]),
+                           np.array([h_max, s_max, v_max]))
+    else:
+        mask = cv2.bitwise_or(
+            cv2.inRange(hsv,
+                        np.array([h_min, s_min, v_min]),
+                        np.array([179, s_max, v_max])),
+            cv2.inRange(hsv,
+                        np.array([0, s_min, v_min]),
+                        np.array([h_max, s_max, v_max])))
     ratio = float(np.count_nonzero(mask)) / mask.size
     ok = ratio >= float(p.get("min_ratio", 0.20))
     return (ok if p.get("output", "bool") == "bool" else round(ratio, 4)), ratio, \
