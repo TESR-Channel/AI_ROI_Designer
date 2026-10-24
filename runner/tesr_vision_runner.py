@@ -58,7 +58,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.6.0"
+STUDIO_VERSION = "1.6.1"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -2027,6 +2027,37 @@ def _panel(img, x, y, w, h, alpha=0.78):
     roi[:] = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, INK, np.uint8), alpha, 0)
 
 
+def value_text(roi, val):
+    """What a reading should look like on a screen, which is not what it is.
+
+    A region set to publish "items" hands back a list of dicts - the class, the
+    confidence and the box for every detection. Printed straight onto the frame
+    and cut to fit, that becomes "[{'class': 'Gr", which reads as a row of
+    broken brackets and tells nobody anything. An empty one becomes "[]", which
+    looks like a fault rather than an empty slot.
+
+    So the overlay says what a person needs - the names - while the published
+    value, the log and the hook keep every field exactly as they were. This is
+    a display, not a transformation.
+    """
+    if val is None or val == "":
+        return "-"
+    if isinstance(val, dict):
+        return count_text(roi, val)        # report:"all" hands back the whole dict
+    if isinstance(val, (list, tuple)):
+        if not val:
+            return "-"                     # nothing in this region right now
+        names = []
+        for v in val:
+            n = v.get("class") or v.get("name") if isinstance(v, dict) else v
+            if n is None:
+                n = str(v)
+            if n not in names:
+                names.append(str(n))
+        return ", ".join(names)
+    return str(val)
+
+
 def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=None,
                  period=""):
     """Boxes carry only their reading; names and confidences live in the panel.
@@ -2042,7 +2073,8 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
     for i, roi in enumerate(rois, 1):
         res = results.get(roi["id"], {})
         val = res.get("value")
-        readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
+        readable = (val not in (None, "", False) and val != []
+                    and not (isinstance(val, str) and "?" in val))
         base = TASK_COLOUR.get(roi["task"], TESR_GOLD)
         colour = base if readable else TESR_RED
         shape = roi.get("shape", "rect")
@@ -2080,11 +2112,9 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
         _text(frame, str(i), (x0 + 4, y0 + 11), 0.36, TESR_GOLD)
 
         # the reading itself, inside the box so neighbours never collide
-        s = "-" if val in (None, "") else str(val)
-        if isinstance(val, dict):
-            s = count_text(roi, val)      # report:"all" hands back the whole dict
+        s = value_text(roi, val)
         if shape == "line":
-            cut = 34 if isinstance(val, dict) else 14
+            cut = 34 if isinstance(val, (dict, list, tuple)) else 14
             (tw, th), _ = cv2.getTextSize(s[:cut], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             tx = min(w - tw - 6, max(4, int(pts[:, 0].mean()) + 12))
             ty = max(th + 30, int(pts[:, 1].min()) + th + 6)
@@ -2150,10 +2180,9 @@ def results_strip(width, rois, results, groups, period=""):
         yy = y + r * line_h
         res = results.get(roi["id"], {})
         val = res.get("value")
-        readable = val not in (None, "", False) and not (isinstance(val, str) and "?" in val)
-        s = "-" if val in (None, "") else str(val)
-        if isinstance(val, dict):
-            s = count_text(roi, val)
+        readable = (val not in (None, "", False) and val != []
+                    and not (isinstance(val, str) and "?" in val))
+        s = value_text(roi, val)
         _text(strip, "%2d" % (idx + 1), (x, yy), 0.36, TESR_GOLD_DEEP)
         _text(strip, roi["name"][:15], (x + 22, yy), 0.36, GREY)
         _text(strip, s[:22], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
