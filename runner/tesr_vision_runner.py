@@ -58,7 +58,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.4.0"
+STUDIO_VERSION = "1.5.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -217,9 +217,22 @@ def gui_available():
     as stubs that raise. Asking once, instead of finding out from an exception
     while shutting down, is the difference between "running headless" and
     "crashed on exit".
+
+    There is a second way to have no GUI, and it is the common one: a full
+    OpenCV build on a machine with no display, which is what you get the moment
+    you SSH into a Raspberry Pi. destroyAllWindows() succeeds there because it
+    touches nothing, and then imshow() calls abort() inside Qt - a process
+    death, not a Python exception, so no try/except can catch it and the
+    readings stop with a wall of Qt text and no explanation. Asking the
+    environment first is the only thing that works.
     """
     global _GUI
     if _GUI is None:
+        if (platform.system() == "Linux"
+                and not os.environ.get("DISPLAY")
+                and not os.environ.get("WAYLAND_DISPLAY")):
+            _GUI = False
+            return _GUI
         try:
             cv2.destroyAllWindows()
             _GUI = True
@@ -2180,9 +2193,11 @@ def run(cfg, args):
     rt = cfg["runtime"]
     show = (rt.get("show_window", True) or args.test) and not args.headless
     if show and not gui_available():
-        log("this OpenCV build has no GUI (opencv-python-headless) - running "
-            "without a window. Readings still go to the console and to every "
-            "output you configured.", "WARN")
+        log("no window available here - either this OpenCV has no GUI "
+            "(opencv-python-headless) or there is no display attached, which "
+            "is what an SSH session looks like. Running without a window; "
+            "readings still go to the console and to every output you "
+            "configured. Pass --headless to mean this on purpose.", "WARN")
         show = False
     console = args.console or rt.get("console", "summary")
 
