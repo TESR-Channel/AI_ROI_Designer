@@ -16,9 +16,12 @@ Optional            : ultralytics (YOLO), pytesseract or easyocr (OCR),
 Usage
 -----
     python tesr_vision_runner.py --config config.json --test
-    python tesr_vision_runner.py --config config.json --camera cam1 --headless
-    python tesr_vision_runner.py --config config.json --source rtsp://... --test
+    python tesr_vision_runner.py --config config.json --camera usb --source 0 --test
+    python tesr_vision_runner.py --config config.json --camera csi --headless
+    python tesr_vision_runner.py --config config.json --camera ip --source rtsp://...
     python tesr_vision_runner.py --config config.json --image sample.jpg --once
+    python tesr_vision_runner.py --config config.json --source clip.mp4 --test
+    python tesr_vision_runner.py --config config.json --camera-id cam2 --headless
     python tesr_vision_runner.py --config config.json --calibrate roi_1
     python tesr_vision_runner.py --config config.json --headless --reset-counters
     python tesr_vision_runner.py --config config.json --selftest
@@ -56,7 +59,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.2.0"
+STUDIO_VERSION = "1.3.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -107,6 +110,30 @@ def log(msg, level="INFO"):
 
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def is_jetson():
+    return (os.path.exists("/etc/nv_tegra_release")
+            or "tegra" in platform.release().lower())
+
+
+CAMERA_KINDS = ("usb", "csi", "ip", "file")
+
+
+def camera_kind(value):
+    """--camera says what KIND of camera, the same way predict.py does.
+
+    Chapters 5 and 6 teach `--camera usb --source 1`, so the runner uses the
+    same words rather than a second convention for the same idea. Choosing a
+    camera out of the config by name is the rarer job and moved to --camera-id.
+    """
+    v = (value or "").strip().lower()
+    if v in CAMERA_KINDS:
+        return v
+    raise argparse.ArgumentTypeError(
+        "%r is not a camera type. Use one of: %s.\n"
+        "  To pick a camera out of the config BY NAME, use --camera-id %s instead."
+        % (value, ", ".join(CAMERA_KINDS), value))
 
 
 def names_of(value):
@@ -272,17 +299,41 @@ IMG_EXT = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
 class FrameSource:
-    """Uniform reader for webcam index, video file, image file or stream URL."""
+    """Uniform reader for webcam index, ribbon camera, video, image or stream.
 
-    def __init__(self, source, width=0, height=0):
+    `kind` is what --camera says, using the same words as predict.py in
+    chapters 5 and 6: usb, csi, ip or file. Left as None the source is read for
+    what it looks like, which is what every config written before v1.3.0
+    relies on, so nothing that worked before stops working.
+    """
+
+    def __init__(self, source, width=0, height=0, kind=None):
         self.raw = source
         self.kind = "camera"
         self.cap = None
         self.still = None
+        self.picam = None
 
         src = source
         if isinstance(src, str) and src.strip().isdigit():
             src = int(src.strip())
+
+        if kind == "csi":
+            self._open_csi(src if isinstance(src, int) else 0,
+                           int(width or 1280), int(height or 720))
+            return
+
+        # Say which flag is wrong rather than failing later with an open error
+        if kind == "ip" and isinstance(src, int):
+            raise SystemExit(
+                "[FATAL] --camera ip needs a stream URL in --source, not the index %r\n"
+                "        e.g. --camera ip --source rtsp://user:pass@192.168.1.50:554/stream"
+                % src)
+        if kind == "usb" and not isinstance(src, int):
+            raise SystemExit(
+                "[FATAL] --camera usb needs an index in --source - 0, 1, 2 ... - not %r\n"
+                "        an image goes with --image, a video or a stream with --source"
+                % src)
 
         if isinstance(src, str) and os.path.isfile(src) and src.lower().endswith(IMG_EXT):
             self.kind = "image"
@@ -301,10 +352,29 @@ class FrameSource:
 
         self.cap = cv2.VideoCapture(src, api) if api else cv2.VideoCapture(src)
         if not self.cap.isOpened():
+            # Now that --camera says which kind it is, say the one thing that
+            # helps rather than a list the reader has to pick their case out of
+            if kind == "usb" or (kind is None and isinstance(src, int)):
+                raise SystemExit(
+                    "[FATAL] could not open USB camera %r.\n"
+                    "        try another index:  --camera usb --source 0   (then 1, then 2)\n"
+                    "        list them on Linux:  v4l2-ctl --list-devices\n"
+                    "        close anything else holding it - a browser tab, Zoom, Teams\n"
+                    "        on macOS allow Camera under System Settings > Privacy\n"
+                    "        ribbon camera? that is  --camera csi" % src)
+            if kind == "ip":
+                raise SystemExit(
+                    "[FATAL] could not open the stream: %r\n"
+                    "        check the URL, the user and password, and that this\n"
+                    "        machine can reach the camera:  ping <its address>\n"
+                    "        try the same URL in VLC first - if VLC cannot play it,\n"
+                    "        the problem is the camera or the network, not this runner"
+                    % source)
             raise SystemExit(
                 "[FATAL] cannot open source: %r\n"
-                "        webcam  -> try 0, 1, 2 / check permission\n"
-                "        rtsp    -> check url, user/password, network" % source)
+                "        file   -> check the path, and that the file is not still copying\n"
+                "        webcam -> --camera usb --source 0  (then 1, 2)\n"
+                "        stream -> --camera ip --source rtsp://..." % source)
         if width:
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
         if height:
@@ -312,9 +382,54 @@ class FrameSource:
         if isinstance(src, str) and os.path.isfile(src):
             self.kind = "video"
 
+    def _open_csi(self, index, width, height):
+        """A ribbon camera is not a webcam, and is not the same thing twice.
+
+        On a Raspberry Pi it is a libcamera device reached through Picamera2,
+        and cv2.VideoCapture cannot open it at all - which is why a CSI camera
+        used to look simply broken here. On a Jetson it is nvarguscamerasrc
+        reached through a GStreamer pipeline, and pip's opencv-python has no
+        GStreamer compiled in, so it needs the system OpenCV that JetPack
+        installed. One flag, two entirely different paths underneath.
+        """
+        if not is_jetson():
+            try:
+                from picamera2 import Picamera2
+            except ImportError:
+                raise SystemExit(
+                    "[FATAL] a CSI ribbon camera needs Picamera2:\n"
+                    "          sudo apt install -y python3-picamera2\n"
+                    "        and a venv built with --system-site-packages, "
+                    "which install_pi.sh does for you.\n"
+                    "        A USB webcam needs none of this: --camera usb --source 0")
+            self.picam = Picamera2(index)
+            self.picam.configure(self.picam.create_preview_configuration(
+                main={"format": "RGB888", "size": (width, height)}))  # RGB888 is BGR to OpenCV
+            self.picam.start()
+            time.sleep(0.5)
+            return
+
+        pipe = ("nvarguscamerasrc sensor-id=%d ! "
+                "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1 ! "
+                "nvvidconv flip-method=0 ! "
+                "video/x-raw,width=%d,height=%d,format=BGRx ! "
+                "videoconvert ! video/x-raw,format=BGR ! "
+                "appsink drop=1 max-buffers=1" % (index, width, height))
+        self.cap = cv2.VideoCapture(pipe, cv2.CAP_GSTREAMER)
+        if not self.cap.isOpened():
+            raise SystemExit(
+                "[FATAL] could not open the Jetson CSI camera (sensor-id=%d).\n"
+                "        check the ribbon, then:  gst-launch-1.0 nvarguscamerasrc ! fakesink\n"
+                "        and check OpenCV has GStreamer:\n"
+                "          python3 -c \"import cv2;print(cv2.getBuildInformation())\" | grep -i gstreamer\n"
+                "        pip's opencv-python has none - use JetPack's system OpenCV."
+                % index)
+
     def read(self):
         if self.kind == "image":
             return True, self.still.copy()
+        if self.picam is not None:
+            return True, self.picam.capture_array()
         ok, frame = self.cap.read()
         if not ok and self.kind == "video":
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # loop the test video
@@ -322,6 +437,8 @@ class FrameSource:
         return ok, frame
 
     def release(self):
+        if self.picam is not None:
+            self.picam.stop()
         if self.cap is not None:
             self.cap.release()
 
@@ -2023,7 +2140,7 @@ def debug_strip(debugs, width):
 # --------------------------------------------------------------------------
 
 def run(cfg, args):
-    cam = pick_camera(cfg, args.camera)
+    cam = pick_camera(cfg, args.camera_id)
     source = args.source or args.image or cam.get("source", "0")
     rt = cfg["runtime"]
     show = (rt.get("show_window", True) or args.test) and not args.headless
@@ -2091,7 +2208,8 @@ def run(cfg, args):
                 if c.restore(saved.get(rid)):
                     log("resumed  : %s = %s" % (c.roi["name"], c.value()))
 
-    src = FrameSource(source, cam.get("width", 0), cam.get("height", 0))
+    src = FrameSource(source, cam.get("width", 0), cam.get("height", 0),
+                      kind=args.camera)
     bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
 
     stable = {r["id"]: {"cand": None, "count": 0, "last": None} for r in rois}
@@ -2249,7 +2367,7 @@ def run(cfg, args):
 # --------------------------------------------------------------------------
 
 def calibrate(cfg, args):
-    cam = pick_camera(cfg, args.camera)
+    cam = pick_camera(cfg, args.camera_id)
     roi = None
     for r in cam.get("rois", []):
         if args.calibrate in (r.get("id"), r.get("name")):
@@ -2258,7 +2376,7 @@ def calibrate(cfg, args):
         raise SystemExit("[FATAL] ROI '%s' not found" % args.calibrate)
 
     src = FrameSource(args.source or args.image or cam.get("source", "0"),
-                      cam.get("width", 0), cam.get("height", 0))
+                      cam.get("width", 0), cam.get("height", 0), kind=args.camera)
     win = "calibrate: %s" % roi["name"]
     if not gui_available():
         raise SystemExit(
@@ -2365,8 +2483,13 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser(description="TESR Edge AI Vision Runner v%s" % VERSION)
     ap.add_argument("--config", default="config.json", help="config.json from TESR ROI Studio")
-    ap.add_argument("--camera", help="camera id or name in the config")
-    ap.add_argument("--source", help="override source (0, rtsp://..., video.mp4)")
+    ap.add_argument("--camera", type=camera_kind, metavar="{usb,csi,ip,file}",
+                    help="camera type, same words as predict.py in chapters 5 and 6: "
+                         "usb webcam, csi ribbon camera, ip stream, file on disk")
+    ap.add_argument("--camera-id", dest="camera_id", metavar="NAME",
+                    help="pick a camera out of the config by id or name (default: the first)")
+    ap.add_argument("--source", help="where it comes from: an index for usb/csi (0, 1, 2), "
+                                     "a URL for ip, a path for file")
     ap.add_argument("--image", help="run on a single image file")
     ap.add_argument("--once", action="store_true", help="process one frame, print JSON, exit")
     ap.add_argument("--test", action="store_true", help="show preview window + ROI debug panel")
