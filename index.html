@@ -538,7 +538,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.4"
+STUDIO_VERSION = "1.7.5"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1394,7 +1394,10 @@ def get_onnx(path):
         _ORT[path] = None
         return None
     if not os.path.isfile(path):
-        log("model file not found: %s" % path, "WARN")
+        # a relative path is opened from the current directory - say which one,
+        # because "not found" next to a file you can see is the usual mistake
+        log("model file not found: %s (relative paths are opened from the folder "
+            "you run the command in: %s)" % (path, os.getcwd()), "WARN")
         _ORT[path] = None
         return None
     providers = ["CPUExecutionProvider"]
@@ -1480,7 +1483,8 @@ def get_yolo(path):
         _MODELS[path] = None
         return None
     if not os.path.isfile(path) and not path.endswith(".pt"):
-        log("model file not found: %s" % path, "WARN")
+        log("model file not found: %s (relative paths are opened from the folder "
+            "you run the command in: %s)" % (path, os.getcwd()), "WARN")
     log("loading model: %s" % path)
     _MODELS[path] = YOLO(path)
     return _MODELS[path]
@@ -4040,7 +4044,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.7.4";
+const STUDIO_VERSION = "1.7.5";
 
 const I18N = {
 th: {
@@ -4278,7 +4282,7 @@ th: {
   classNamesHint:"ชื่อจับคู่<b>ตามลำดับ</b> สลับลำดับเมื่อไร ป้ายผิดทั้งหมดโดยไม่มีอะไรเตือน · ถ้าเว้นว่างจะแสดงเป็นเลข index แทน",
   namesFromFile:"อ่านจากไฟล์โมเดลแล้ว:",
   namesNotInFile:"ไฟล์นี้ไม่ได้พกชื่อคลาสมาด้วย — ดู classes.txt ที่อยู่ข้างกัน ลำดับบรรทัดคือลำดับ index แล้วพิมพ์ให้ตรงลำดับนั้น",
-  modelPrivacy:'โมเดลถูกเก็บไว้ในเบราว์เซอร์ของเครื่องนี้เท่านั้น ไม่มีการอัปโหลดไปที่ใด<br>ตอนกดส่งออก config ระบบจะใส่ชื่อไฟล์โมเดลลงใน config ให้ แต่ไฟล์ .onnx ต้องคัดลอกไปวางข้าง ๆ <span class="kbd">tesr_vision_runner.py</span> เอง',
+  modelPrivacy:'โมเดลถูกเก็บไว้ในเบราว์เซอร์ของเครื่องนี้เท่านั้น ไม่มีการอัปโหลดไปที่ใด<br>ตอนกด <b>ส่งออก config + Python</b> ไฟล์ .onnx จะถูกใส่ลงใน .zip ให้ด้วย ตามชื่อไฟล์ตอน deploy อยู่คู่กับ config และ <span class="kbd">tesr_vision_runner.py</span> ไม่ต้องคัดลอกเอง แตก zip ลงโฟลเดอร์เดียว แล้วรันคำสั่งจากโฟลเดอร์นั้น',
   rtFps:"Loop FPS สูงสุด", rtShow:"แสดงหน้าต่างภาพ", rtShowYes:"แสดง", rtShowNo:"ไม่แสดง (headless)",
   rtCsv:"บันทึก CSV", rtJsonl:"บันทึก JSONL", rtSave:"เก็บภาพเมื่อค่าเปลี่ยน",
   rtSaveNo:"ไม่เก็บ", rtSaveYes:"เก็บ", rtSaveDir:"โฟลเดอร์เก็บภาพ",
@@ -4529,7 +4533,7 @@ en: {
   classNamesHint:"Names are matched <b>by position</b>. One name out of order relabels every detection and nothing warns you · leave blank to show index numbers instead",
   namesFromFile:"Read from the model file:",
   namesNotInFile:"This file carries no class names — open classes.txt next to it, where the line order IS the index order, and type them in that order",
-  modelPrivacy:'The model stays in this browser on this machine. Nothing is uploaded anywhere.<br>Exporting a config records the model filename, but you still need to copy the .onnx file next to <span class="kbd">tesr_vision_runner.py</span> yourself.',
+  modelPrivacy:'The model stays in this browser on this machine. Nothing is uploaded anywhere.<br>When you press <b>Export config + Python</b>, the .onnx file goes into the .zip under its deploy filename, alongside the config and <span class="kbd">tesr_vision_runner.py</span> &mdash; there is nothing to copy by hand. Unzip it into one folder and run the command from that folder.',
   rtFps:"Max loop FPS", rtShow:"Show the video window", rtShowYes:"Show", rtShowNo:"Hide (headless)",
   rtCsv:"Write CSV", rtJsonl:"Write JSONL", rtSave:"Save an image when the value changes",
   rtSaveNo:"Don't save", rtSaveYes:"Save", rtSaveDir:"Image folder",
@@ -4682,10 +4686,57 @@ function defaultParams(task){
     default: return {};
   }
 }
+/* A new region carries no conf, iou or imgsz of its own: until a model is
+   attached the runner's defaults apply (0.25, 0.45, 640 / 224 for classify),
+   and attaching one fills in the values set in the Add model dialog. A region
+   that already HAS a conf or an iou - typed into the panel, or imported from
+   a layout file - keeps it. See attachModel(). */
 function defaultModel(task){
-  if(task === "yolo_detect")   return {path:"yolov8n.pt", conf:0.25, iou:0.45, imgsz:640, classes:[]};
-  if(task === "yolo_classify") return {path:"yolov8n-cls.pt", imgsz:224};
+  if(task === "yolo_detect")   return {path:"yolov8n.pt", classes:[]};
+  if(task === "yolo_classify") return {path:"yolov8n-cls.pt"};
   return null;
+}
+const hasNum = v => v !== "" && v != null && isFinite(+v);
+
+/* the input size the .onnx file itself declares, 0 when it says nothing.
+   This is a fact about the graph, not a preference: a fixed-shape model run
+   at any other size does not run at all. Cached on the record - parsing a
+   few MB of protobuf on every export is not free. */
+function fileImgsz(m){
+  if(m._fileImgsz === undefined){
+    let n = 0;
+    try{
+      const raw = m.bytes ? onnxMeta(m.bytes).imgsz : null;
+      if(raw){
+        try{ const a = JSON.parse(raw); n = Array.isArray(a) ? +a[0] : +a; }
+        catch(e){ n = +raw; }
+      }
+    }catch(e){ n = 0; }
+    m._fileImgsz = n > 0 ? n : 0;
+  }
+  return m._fileImgsz;
+}
+
+/* Point a region's (or a camera detector's) model block at a model from the
+   list. Up to v1.7.4 this copied the dialog's conf and iou over whatever the
+   region had, so importing chapter 8's tray_slots.json (conf 0.35 on every
+   slot) and attaching model.onnx exported conf 0.25 four times.
+     path, id      always the model's
+     class_names   the model's, unless it has none and the region does
+     imgsz         what the file declares; else the region's own when it is
+                   still on the same model (or never had one); else the dialog's
+     conf, iou     the region's own when it has one; the dialog's only if not */
+function attachModel(rm, m){
+  const switching = rm.id && rm.id !== m.id;
+  rm.id = m.id;
+  rm.path = m.deploy;
+  if(m.names && m.names.length) rm.class_names = m.names;
+  const fixed = fileImgsz(m);
+  if(fixed) rm.imgsz = fixed;
+  else if(switching || !(+rm.imgsz > 0)) rm.imgsz = m.size;
+  if(!hasNum(rm.conf)) rm.conf = m.conf;
+  if(!hasNum(rm.iou))  rm.iou  = m.iou;
+  return rm;
 }
 
 /* ------------------------------ state ------------------------------ */
@@ -5337,7 +5388,7 @@ function field(label, node){
 function num(obj, key, opts){
   const i = document.createElement("input"); i.type = "number";
   if(opts) Object.assign(i, opts);
-  i.value = obj[key];
+  i.value = obj[key] != null ? obj[key] : "";
   i.oninput = () => { obj[key] = i.value === "" ? "" : +i.value; updatePreview(); invalidate(); };
   return i;
 }
@@ -5475,9 +5526,7 @@ function renderTaskParams(r){
     pick.value = r.model.id || "";
     pick.onchange = () => {
       const m = models.find(x => x.id === pick.value);
-      r.model.id = pick.value;
-      if(m){ r.model.path = m.deploy; r.model.imgsz = m.size;
-             r.model.conf = m.conf; r.model.iou = m.iou; r.model.class_names = m.names; }
+      if(m) attachModel(r.model, m); else r.model.id = pick.value;
       syncProps(); updatePreview();
     };
     add(field(t("pModelUse"), pick));
@@ -5533,9 +5582,10 @@ function renderTaskParams(r){
     holdHint.textContent = t("pHoldHint");
     add(holdHint);
 
-    add(rowOf([field("conf", num(r.model,"conf",{min:0,max:1,step:0.05})),
-               field("iou", num(r.model,"iou",{min:0,max:1,step:0.05})),
-               field("imgsz", num(r.model,"imgsz",{min:64,step:32}))]));
+    add(rowOf([field("conf", num(r.model,"conf",{min:0,max:1,step:0.05,placeholder:"0.25"})),
+               field("iou", num(r.model,"iou",{min:0,max:1,step:0.05,placeholder:"0.45"})),
+               field("imgsz", num(r.model,"imgsz",{min:64,step:32,
+                                 placeholder: r.task === "yolo_classify" ? "224" : "640"}))]));
     if(r.task === "yolo_detect"){
       add(field(t("pOutput"), sel(p,"output",
         [["count",t("outCount")],["classes",t("outClasses")],["items",t("outItems")]])));
@@ -5693,7 +5743,7 @@ function syncDetectorUi(){
 P("camDetector").onchange = () => {
   const c = cam(); if(!c) return;
   const m = models.find(x => x.id === P("camDetector").value);
-  if(m) c.detector = {id:m.id, path:m.deploy, imgsz:m.size, conf:m.conf, iou:m.iou, class_names:m.names};
+  if(m) c.detector = attachModel(Object.assign({}, c.detector || {}), m);
   else delete c.detector;
 };
 
@@ -7325,7 +7375,8 @@ function verdictOf(roi, value){
 }
 
 /* run one model over one crop canvas */
-async function runModel(model, canvas){
+async function runModel(model, canvas, region){
+  const rm = region || {};
   const ort = await loadOrt();
   const session = await getSession(model);
   const g = canvas.getContext("2d", {willReadFrequently:true});
@@ -7341,7 +7392,8 @@ async function runModel(model, canvas){
     return {items: [], value: c.name, conf: c.conf};
   }
   const items = decodeDetect(out.data, out.dims, lb,
-                  {conf:+model.conf || 0.25, iou:+model.iou || 0.45, names: model.names});
+                  {conf: hasNum(rm.conf) ? +rm.conf : (+model.conf || 0.25),
+                   iou:  hasNum(rm.iou)  ? +rm.iou  : (+model.iou  || 0.45), names: model.names});
   return {items, value: items.length,
           conf: items.length ? items.reduce((a,d) => a + d.conf, 0) / items.length : 0};
 }
@@ -7617,7 +7669,7 @@ async function evalRoi(roi){
     const m = models.find(x => x.id === (roi.model && roi.model.id));
     if(!m) return {value:null, conf:0, crop, note: t("noModelPicked")};
     try{
-      const r = await runModel(m, crop);
+      const r = await runModel(m, crop, roi.model);
       let value = r.value;
       if(roi.task === "yolo_detect" && roi.params.output === "classes")
         value = [...new Set(r.items.map(i => i.name))];
@@ -8241,7 +8293,13 @@ function buildConfig(includeRef){
         if(r.model){
           const m = models.find(x => x.id === r.model.id);
           o.model = Object.assign({}, r.model);
-          if(m){ o.model.path = m.deploy; o.model.class_names = m.names; o.model.imgsz = m.size; }
+          if(m){
+            o.model.path = m.deploy;
+            if(m.names && m.names.length) o.model.class_names = m.names;
+            o.model.imgsz = fileImgsz(m) || (+o.model.imgsz > 0 ? +o.model.imgsz : m.size);
+            if(!hasNum(o.model.conf)) o.model.conf = m.conf;
+            if(!hasNum(o.model.iou))  o.model.iou  = m.iou;
+          }
           delete o.model.id;             // browser-only handle, meaningless on the edge device
         }
         return o;
@@ -8432,8 +8490,13 @@ function projectReadme(cfgName, mdls){
     "  image and the models all come back, already attached.",
     "",
     "TO RUN IT",
-    "  Unzip the whole thing into one folder and run from THAT folder -",
-    "  the runner looks for the model beside itself, not beside the config.",
+    "  Unzip the whole thing into one folder, cd into it and run from there.",
+    "  The model path in the config is relative, and the runner opens it from",
+    "  the folder you RUN the command in (the current directory) - not from",
+    "  the runner's folder and not from the config's folder. Logs and captures",
+    "  are written relative to that folder too." + (needsLineEngine()
+        ? "\n  tesr_line_engine.py is the one exception: Python finds it beside\n" +
+          "  tesr_vision_runner.py, wherever you run from." : ""),
     "",
     "    python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 0 --test",
     "    python tesr_vision_runner.py --config " + cfgName + " --image photo.jpg --once",
@@ -8636,7 +8699,9 @@ cams,
 "   --camera ip --source rtsp://user:pass@192.168.1.50:554/stream1",
 "   " + pad("--camera-id " + camId2) + "เลือกกล้องอื่นในไฟล์เดียวกัน (ตาม id หรือชื่อ ดูรายการด้านบน)",
 "",
-"ถ้ามี ROI ที่ใช้โมเดล อย่าลืมคัดลอกไฟล์ .onnx ไปวางไว้โฟลเดอร์เดียวกันด้วย",
+(mdls.length ? "ไฟล์โมเดล .onnx อยู่ใน zip นี้แล้ว (ดูรายการด้านบน) ไม่ต้องคัดลอกเอง\n" +
+ "ชื่อโมเดลใน config เป็น path แบบ relative ซึ่ง runner จะเปิดจากโฟลเดอร์ที่คุณสั่งรันคำสั่ง\n" +
+ "จึงต้อง cd เข้าโฟลเดอร์ที่แตก zip ไว้ก่อนรัน" : ""),
 "",
 "ผลลัพธ์ที่ได้",
 "   " + ["พิมพ์ค่าออกหน้าจอ"].concat(outs).join(" · "),
@@ -8691,7 +8756,9 @@ cams,
 "   --camera ip --source rtsp://user:pass@192.168.1.50:554/stream1",
 "   " + pad("--camera-id " + camId2) + "another camera from the same config (by id or name, listed above)",
 "",
-"If any ROI uses a model, copy the .onnx file into the same folder as well.",
+(mdls.length ? "The .onnx model is already inside this zip (listed above) - nothing to copy.\n" +
+ "Its path in the config is relative, and the runner opens it from the folder you\n" +
+ "run the command in, so cd into the unzipped folder before you run it." : ""),
 "",
 "What you get",
 "   " + ["values printed to the console"].concat(outs).join(" · "),
