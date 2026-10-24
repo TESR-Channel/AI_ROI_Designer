@@ -52,14 +52,13 @@ except ImportError:  # pragma: no cover
     )
     raise
 
-VERSION = "1.2.0"
 SCHEMA = "tesr.roi.v1"
 # Bumped whenever the Studio or this runner changes in a way that could make
 # an old config or an old runner behave differently. The Studio stamps the
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.3.1"
+STUDIO_VERSION = "1.4.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -110,6 +109,21 @@ def log(msg, level="INFO"):
 
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _ver(s):
+    """'1.3.2' -> (1, 3, 2), so versions sort as numbers and not as text.
+
+    Compared as strings, '1.10.0' sorts BEFORE '1.9.0', which would make the
+    check below start lying the first time a minor version reaches ten.
+    """
+    parts = []
+    for piece in str(s or "0").split("."):
+        digits = "".join(c for c in piece if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
 
 
 def is_jetson():
@@ -260,10 +274,19 @@ def load_config(path):
         log("config schema is '%s', expected '%s' - trying anyway"
             % (cfg.get("schema"), SCHEMA), "WARN")
     cfg_ver = cfg.get("studio_version")
-    if cfg_ver and cfg_ver != STUDIO_VERSION:
-        log("version mismatch: this config was exported by Studio v%s, "
-            "this runner is v%s. Re-export from the Studio (hard-refresh the "
-            "page first) so the two match." % (cfg_ver, STUDIO_VERSION), "WARN")
+    if cfg_ver and _ver(cfg_ver) > _ver(STUDIO_VERSION):
+        # Only this direction is dangerous. A config written by a NEWER Studio
+        # can carry fields this runner has never heard of, and it will ignore
+        # them without a word - which is how a region quietly loses the thing
+        # you set on it. The other direction is safe and is the normal way this
+        # course is used: the chapters ship hand-written configs and ask you to
+        # run them with a runner you exported later. Warning on that would put
+        # a warning on every correct run, which teaches people to ignore them.
+        log("this config was exported by Studio v%s, which is NEWER than this "
+            "runner (v%s). Anything added since v%s will be ignored without "
+            "being mentioned again. Export the runner from the same Studio - "
+            "hard-refresh the page first."
+            % (cfg_ver, STUDIO_VERSION, STUDIO_VERSION), "WARN")
     elif not cfg_ver:
         log("this config predates version stamping - re-export it when you can",
             "WARN")
@@ -2073,7 +2096,7 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
     draw_mark(frame, 14, 13, 8)
     _text(frame, "TESR", (28, 18), 0.52, TESR_RED, 2)
     bar = "VISION RUNNER v%s | %s | %.1f FPS | q=quit s=snapshot p=panel" % (
-        VERSION, cam.get("name", cam["id"]), fps)
+        STUDIO_VERSION, cam.get("name", cam["id"]), fps)
     _text(frame, bar, (76, 18), 0.45, WHITE)
 
     if show_panel:
@@ -2493,7 +2516,7 @@ def selftest():
 # --------------------------------------------------------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="TESR Edge AI Vision Runner v%s" % VERSION)
+    ap = argparse.ArgumentParser(description="TESR Edge AI Vision Runner v%s" % STUDIO_VERSION)
     ap.add_argument("--config", default="config.json", help="config.json from TESR ROI Studio")
     ap.add_argument("--camera", type=camera_kind, metavar="{usb,csi,ip,file}",
                     help="camera type, same words as predict.py in chapters 5 and 6: "
@@ -2528,7 +2551,7 @@ def main():
         signal.signal(signal.SIGTERM, _stop)
 
     if args.version:
-        print("TESR Vision Runner %s (schema %s)" % (VERSION, SCHEMA))
+        print("TESR Vision Runner %s (schema %s)" % (STUDIO_VERSION, SCHEMA))
         return 0
     if args.selftest:
         return selftest()
