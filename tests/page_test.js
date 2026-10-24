@@ -157,6 +157,30 @@ whenReady(() => {
   check("reset settings reach the exported config",
         cfg.runtime.counter_reset.shifts, ["06:00", "14:00", "22:00"]);
 
+  console.log("\n--- attaching a model keeps the region's own conf / iou ---");
+  const attach = G("attachModel");
+  const mdl = { id: "m1", deploy: "model.onnx", size: 224, conf: 0.25, iou: 0.45,
+                names: ["a", "b"], _fileImgsz: 224 };
+  const imported = attach({ path: "model.onnx", imgsz: 224, conf: 0.35,
+                            class_names: ["a", "b"] }, mdl);
+  check("imported conf 0.35 survives attach", [imported.conf, imported.iou], [0.35, 0.45]);
+  const fresh = attach(G("defaultModel")("yolo_detect"), mdl);
+  check("a fresh region takes the dialog values", [fresh.conf, fresh.iou, fresh.imgsz], [0.25, 0.45, 224]);
+  const typed = attach({ conf: 0.6, iou: 0.3, imgsz: 640 }, mdl);
+  check("the file's imgsz wins, typed conf/iou stay", [typed.conf, typed.iou, typed.imgsz], [0.6, 0.3, 224]);
+  const blank = attach({ conf: "", path: "x" }, mdl);
+  check("a cleared conf field takes the dialog value", blank.conf, 0.25);
+
+  console.log("\n--- export text says the model is in the zip ---");
+  const readme = G("projectReadme")("p_config.json", [mdl]);
+  check("README.txt no longer says 'beside itself'", /beside itself/.test(readme), false);
+  check("README.txt says the current folder", /folder you RUN the command in/.test(readme), true);
+  const stale = /copy the \.onnx|คัดลอกไฟล์ \.onnx|ต้องคัดลอกไปวาง/;
+  check("no dialog string tells you to copy the .onnx",
+        Object.values(G("I18N")).flatMap(d => Object.values(d)).filter(v => stale.test(String(v))).length, 0);
+  check("quickstart does not tell you to copy the .onnx",
+        stale.test(G("quickstart")("p_config.json", "p_project.zip", [mdl], 1024)), false);
+
   console.log("\n--- the exported Python matches runner/ byte for byte ---");
   for (const [id, file] of [["runnerSrc", "runner/tesr_vision_runner.py"],
                             ["lineSrc", "runner/tesr_line_engine.py"]]) {

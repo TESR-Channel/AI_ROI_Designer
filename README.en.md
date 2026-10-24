@@ -96,7 +96,7 @@ yolo export model=best.pt format=onnx opset=12
 ```
 
 * The model stays in that browser on that machine. Nothing is uploaded anywhere.
-* Exporting a config records the model filename and class names, but you still need to copy the `.onnx` file next to `tesr_vision_runner.py` yourself.
+* **Export config + Python** puts the `.onnx` file into the project `.zip` under its deploy filename, with the config, the runner and the class names — there is nothing to copy by hand. Unzip it into one folder and run from that folder: the model path in the config is relative, and the runner opens it from the folder you run the command in, not from the runner's or the config's folder.
 * On the Python side, `.onnx` runs on `onnxruntime` alone — **no Ultralytics, no PyTorch** — which matters a great deal on a Raspberry Pi.
 
 ```bash
@@ -794,7 +794,7 @@ before it is published, exactly as for every other task.
 | Low FPS on a Pi | Camera resolution higher than needed | Lower `width`/`height`, set `loop_fps`, use `every_n_frames` |
 | The camera will not open in the browser | The browser is refusing permission | Use Chrome or Edge and allow the camera; meanwhile load an image instead |
 | "Could not load the engine" after adding a model | The machine is offline | The ONNX engine is fetched once; connect and reload the page |
-| The model runs in the browser but Python cannot find it | The `.onnx` file was never copied over | Put the `.onnx` in the same folder as `tesr_vision_runner.py` |
+| The model runs in the browser but Python cannot find it | The command was run from a different folder, or only the config was copied out of the zip | `cd` into the unzipped folder and run from there — a relative model path is opened from the current folder (the warning prints which folder that is) |
 | Every button in the page is dead | A script error | A red bar appears at the top with the message; press F12 → Console for details |
 
 ---

@@ -58,7 +58,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.4"
+STUDIO_VERSION = "1.7.5"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -914,7 +914,10 @@ def get_onnx(path):
         _ORT[path] = None
         return None
     if not os.path.isfile(path):
-        log("model file not found: %s" % path, "WARN")
+        # a relative path is opened from the current directory - say which one,
+        # because "not found" next to a file you can see is the usual mistake
+        log("model file not found: %s (relative paths are opened from the folder "
+            "you run the command in: %s)" % (path, os.getcwd()), "WARN")
         _ORT[path] = None
         return None
     providers = ["CPUExecutionProvider"]
@@ -1000,7 +1003,8 @@ def get_yolo(path):
         _MODELS[path] = None
         return None
     if not os.path.isfile(path) and not path.endswith(".pt"):
-        log("model file not found: %s" % path, "WARN")
+        log("model file not found: %s (relative paths are opened from the folder "
+            "you run the command in: %s)" % (path, os.getcwd()), "WARN")
     log("loading model: %s" % path)
     _MODELS[path] = YOLO(path)
     return _MODELS[path]
