@@ -194,7 +194,6 @@
   <button id="btnImport" data-i18n="importConfig"></button>
   <button id="btnRuntime" data-i18n="runtimeSettings"></button>
   <button id="btnJson" data-i18n="viewJson"></button>
-  <button id="btnProject" data-i18n="saveProject"></button>
   <button id="btnPy" class="primary" data-i18n="exportBtn"></button>
   <input type="file" id="fileImport" accept=".json,.zip,application/json,application/zip" hidden>
 </header>
@@ -539,7 +538,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.5.0"
+STUDIO_VERSION = "1.6.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -3837,13 +3836,12 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.5.0";
+const STUDIO_VERSION = "1.6.0";
 
 const I18N = {
 th: {
   /* header + chrome */
   projectName:"ชื่อโปรเจกต์", importConfig:"นำเข้า config", runtimeSettings:"ตั้งค่า Runtime",
-  saveProject:"บันทึกโปรเจกต์ (.zip)",
   projectSaved:"บันทึกโปรเจกต์แล้ว — ไฟล์เดียวจบ ทั้งแก้ต่อและรันได้",
   projectOpened:"เปิดโปรเจกต์แล้ว โมเดลติดกลับมาให้เรียบร้อย",
   dupDeploy:"มีโมเดลมากกว่าหนึ่งตัวใช้ชื่อไฟล์เดียวกัน จะชนกันทั้งในโฟลเดอร์และบนเครื่องจริง — แก้ชื่อก่อน: ",
@@ -4105,7 +4103,6 @@ th: {
 
 en: {
   projectName:"Project name", importConfig:"Import config", runtimeSettings:"Runtime settings",
-  saveProject:"Save project (.zip)",
   projectSaved:"Project saved — one file to carry on from, and to run",
   projectOpened:"Project opened, models attached",
   dupDeploy:"Two models share one deployed filename; they would collide in the folder and on the device. Rename one first: ",
@@ -8168,22 +8165,7 @@ P("dlgCopy").onclick = async () => {
   catch(e){ toast(t("copyFailed")); }
 };
 P("btnPy").onclick = () => {
-  const name = slug(P("projName").value);
-  download(name + "_config.json", JSON.stringify(buildConfig(true), null, 2), "application/json");
-  const py = document.getElementById("runnerSrc").textContent;
-  setTimeout(() => download("tesr_vision_runner.py", py, "text/x-python"), 350);
-  // a config with lines or zones cannot run without the engine, so send it too
-  const needsLine = state.cameras.some(c => (c.rois || []).some(
-    r => ["level_line","measure_line","line_count","zone_count"].indexOf(r.task) >= 0));
-  if(needsLine){
-    const eng = document.getElementById("lineSrc").textContent;
-    setTimeout(() => download("tesr_line_engine.py", eng, "text/x-python"), 550);
-  }
-  setTimeout(() => {
-    P("dlgTitle").textContent = t("qsTitle");
-    P("dlgBody").textContent = quickstart(name);
-    P("dlg").showModal();
-  }, 700);
+  exportAll().catch(e => toast(t("badFile") + e.message));
 };
 function downloadBlob(name, blob){
   const a = document.createElement("a");
@@ -8239,7 +8221,7 @@ function projectReadme(cfgName, mdls){
   return lines.join("\n");
 }
 
-async function saveProject(){
+async function exportAll(){
   const enc = new TextEncoder();
   const name = slug(P("projName").value);
   const cfgName = name + "_config.json";
@@ -8275,9 +8257,11 @@ async function saveProject(){
   entries.push({name: "README.txt", data: enc.encode(projectReadme(cfgName, mdls))});
 
   const blob = zipWrite(entries);
-  downloadBlob(name + "_project.zip", blob);
-  toast(t("projectSaved") + " (" + (blob.size / 1048576).toFixed(1) + " MB, " +
-        mdls.length + " " + t("classesCount") + ")");
+  const zipName = name + "_project.zip";
+  downloadBlob(zipName, blob);
+  P("dlgTitle").textContent = t("qsTitle");
+  P("dlgBody").textContent = quickstart(cfgName, zipName, mdls, blob.size);
+  P("dlg").showModal();
 }
 
 async function openProject(file){
@@ -8353,20 +8337,25 @@ async function openProject(file){
   toast(t("projectOpened") + " · " + restored.length + " model, " + linked + " ROI");
 }
 
-P("btnProject").onclick = () => { saveProject().catch(e => toast(t("badFile") + e.message)); };
-
 function needsLineEngine(){
   return state.cameras.some(c => (c.rois || []).some(
     r => ["level_line","measure_line","line_count","zone_count"].indexOf(r.task) >= 0));
 }
-function quickstart(name){
+function quickstart(cfg, zipName, mdls, bytes){
   const cams = state.cameras.map(c => "  " + c.id + "  (" + c.rois.length + " ROI)  source=" + c.source).join("\n");
-  const cfg = name + "_config.json";
+  const mb = (bytes / 1048576).toFixed(1);
+  const modelLines = mdls.map(m => "  " + m.deploy +
+    "   " + m.type + ", imgsz " + m.size +
+    (m.names.length ? ", " + m.names.length + " classes" : ""));
   const TH = [
-"ไฟล์ที่ดาวน์โหลด",
-"  " + cfg + "     กรอบ ROI ทั้งหมด + ค่าพารามิเตอร์",
+zipName + "  (" + mb + " MB)  —  แตกไฟล์ลงโฟลเดอร์เดียว แล้วรันจากโฟลเดอร์นั้น",
+"",
+"ข้างในมีอะไร",
+"  " + cfg + "     กรอบ ROI ทั้งหมด + ค่าพารามิเตอร์ + ภาพอ้างอิง",
 "  tesr_vision_runner.py        โปรแกรมอ่านค่า ใช้ได้ทั้ง Windows / macOS / Linux / Raspberry Pi / Jetson",
 (needsLineEngine() ? "  tesr_line_engine.py          เอนจินเส้นและพื้นที่ ต้องวางไว้โฟลเดอร์เดียวกัน" : ""),
+modelLines.join("\n"),
+"  project.json                 ไฟล์โปรเจกต์ ลากกลับเข้าปุ่ม นำเข้า config ได้ ไม่ต้องวาดใหม่",
 "",
 "กล้องในไฟล์นี้",
 cams,
@@ -8413,10 +8402,14 @@ cams,
 "   ค่าความแม่นยำจริงต้องวัดจากหน้างานเท่านั้น"
   ];
   const EN = [
-"Files you just downloaded",
-"  " + cfg + "     every ROI plus its parameters",
+zipName + "  (" + mb + " MB)  —  unzip it into one folder and run from THAT folder",
+"",
+"What is inside",
+"  " + cfg + "     every ROI, its parameters and the reference image",
 "  tesr_vision_runner.py        the reader; runs on Windows / macOS / Linux / Raspberry Pi / Jetson",
 (needsLineEngine() ? "  tesr_line_engine.py          the line and zone engine; keep it in the same folder" : ""),
+modelLines.join("\n"),
+"  project.json                 the project itself - hand this zip back to Import config and carry on",
 "",
 "Cameras in this config",
 cams,
