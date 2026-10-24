@@ -51,6 +51,12 @@ except ImportError:  # pragma: no cover
 
 VERSION = "1.2.0"
 SCHEMA = "tesr.roi.v1"
+# Bumped whenever the Studio or this runner changes in a way that could make
+# an old config or an old runner behave differently. The Studio stamps the
+# same number into every config it exports, and load_config() below says so
+# out loud when the two do not match - guessing whether your files are in
+# step is not a thing anybody should have to do.
+STUDIO_VERSION = "1.1.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -170,6 +176,14 @@ def load_config(path):
     if cfg.get("schema") != SCHEMA:
         log("config schema is '%s', expected '%s' - trying anyway"
             % (cfg.get("schema"), SCHEMA), "WARN")
+    cfg_ver = cfg.get("studio_version")
+    if cfg_ver and cfg_ver != STUDIO_VERSION:
+        log("version mismatch: this config was exported by Studio v%s, "
+            "this runner is v%s. Re-export from the Studio (hard-refresh the "
+            "page first) so the two match." % (cfg_ver, STUDIO_VERSION), "WARN")
+    elif not cfg_ver:
+        log("this config predates version stamping - re-export it when you can",
+            "WARN")
     rt = dict(DEFAULT_RUNTIME)
     rt.update(cfg.get("runtime") or {})
     for key in ("mqtt", "webhook", "counter_reset"):
@@ -1963,6 +1977,7 @@ def run(cfg, args):
     auto_group = args.auto_group or bool(rt.get("auto_group"))
     groups = build_groups(rois, auto=auto_group)
 
+    log("version  : runner v%s" % STUDIO_VERSION)
     log("platform : %s %s | python %s | opencv %s"
         % (platform.system(), platform.machine(), platform.python_version(), cv2.__version__))
     log("camera   : %s (%s)  source=%r" % (cam.get("name"), cam.get("id"), source))
