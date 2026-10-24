@@ -58,7 +58,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.3"
+STUDIO_VERSION = "1.7.4"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -2063,6 +2063,37 @@ def _fit_text(txt, max_w, scale):
 DEFAULT_HOLD = 5          # frames; only for regions that run a model
 
 
+def runs_now(roi, frame_i):
+    """Does this region run on frame number frame_i (counted from 1)?
+
+    every_n_frames N means frames 1, 1+N, 1+2N ... - the FIRST frame always
+    runs. Counting "frame_i % N == 0" from 1 skipped it, which a live camera
+    never notices but --once on a single picture does: the one frame it had
+    was the one frame the region sat out.
+    """
+    return (frame_i - 1) % max(1, int(roi.get("every_n_frames", 1))) == 0
+
+
+def once_frame_budget(rois):
+    """How many frames --once may read before it gives up waiting to settle.
+
+    A region settles after stable_frames readings that agree, and it only reads
+    every every_n_frames frames, so the slowest region needs about the product
+    of the two (a model region's hold counts as well). Twice that plus a margin
+    leaves room for a camera's first dark frames, and still ends in a moment on
+    a still picture, which is read again and again until it settles.
+    """
+    worst = 1
+    for r in rois:
+        n = max(1, int(r.get("every_n_frames", 1)))
+        need = max(1, int(r.get("stable_frames", 1)))
+        if r.get("task") in MODEL_TASKS:
+            hold = (r.get("params") or {}).get("hold")
+            need = max(need, DEFAULT_HOLD if hold is None else int(hold))
+        worst = max(worst, need * n)
+    return 2 * worst + 10
+
+
 def reading_key(value):
     """What counts as "the same reading", ignoring what jitters every frame.
 
@@ -2392,6 +2423,12 @@ def run(cfg, args):
                         "value": None, "conf": 0.0} for r in rois}
     gstable = {n: None for n, _ in groups}
     results = {}
+    # --once used to print after the very first frame, which since the
+    # stability gate (v1.7.0) meant null for every region with stable_frames
+    # above 1. It now keeps reading - the same picture again for --image -
+    # until every region has settled, and only then prints.
+    settled = {r["id"]: False for r in rois if TASKS.get(r.get("task"))}
+    once_budget = once_frame_budget(rois) if args.once else 0
     show_panel = not args.no_panel
     period = 1.0 / max(1.0, float(rt.get("loop_fps", 10)))
     frame_i, fps, t_prev = 0, 0.0, time.time()
@@ -2433,7 +2470,7 @@ def run(cfg, args):
 
             debugs = []
             for roi in rois:
-                if frame_i % max(1, int(roi.get("every_n_frames", 1))) != 0:
+                if not runs_now(roi, frame_i):
                     continue
                 fn = TASKS.get(roi["task"])
                 if fn is None:
@@ -2491,6 +2528,10 @@ def run(cfg, args):
                 results[roi["id"]] = {
                     "value": st["value"],
                     "conf": conf if rkey == st["last"] else st["conf"]}
+                # settled: enough agreeing readings, and that is what was told
+                # to the rest of the system (a region that reads nothing settles
+                # on null, which is an answer too)
+                settled[roi["id"]] = st["count"] >= need_now and rkey == st["last"]
 
             # shift / daily rollover: publish the closing numbers before zeroing
             for c in ctx["counters"].values():
@@ -2544,6 +2585,18 @@ def run(cfg, args):
                     log("saved %s" % p)
 
             if args.once:
+                done = all(settled.values())
+                if not done and frame_i < once_budget:
+                    if src.kind != "image":     # the same picture needs no wait
+                        sleep = period - (time.time() - t0)
+                        if sleep > 0:
+                            time.sleep(sleep)
+                    continue
+                if not done:
+                    log("--once: %s did not settle within %d frames - printing "
+                        "the last settled value (null if none)"
+                        % (", ".join(r["name"] for r in rois if not settled.get(r["id"], True)),
+                           frame_i), "WARN")
                 summary = {r["name"]: results.get(r["id"], {}).get("value") for r in rois}
                 for name, members in groups:
                     summary[name] = group_value(members, results)[0]
@@ -2691,7 +2744,8 @@ def main():
     ap.add_argument("--source", help="where it comes from: an index for usb/csi (0, 1, 2), "
                                      "a URL for ip, a path for file")
     ap.add_argument("--image", help="run on a single image file")
-    ap.add_argument("--once", action="store_true", help="process one frame, print JSON, exit")
+    ap.add_argument("--once", action="store_true",
+                    help="read until every ROI has settled (stable_frames), print one JSON, exit")
     ap.add_argument("--test", action="store_true", help="show preview window + ROI debug panel")
     ap.add_argument("--headless", action="store_true", help="no window (service / SSH / Jetson)")
     ap.add_argument("--console", choices=["summary", "change", "none"],
