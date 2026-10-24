@@ -538,7 +538,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.0"
+STUDIO_VERSION = "1.7.1"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -2509,6 +2509,26 @@ def _panel(img, x, y, w, h, alpha=0.78):
     roi[:] = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, INK, np.uint8), alpha, 0)
 
 
+def _text_w(txt, scale):
+    """How wide this string will actually be, in pixels, at this scale."""
+    return cv2.getTextSize(str(txt), cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0][0]
+
+
+def _fit_text(txt, max_w, scale):
+    """Cut to the space measured for it, not to a guessed character count.
+
+    A character count cannot know that "Green_Apple" is wider than "48.6" at
+    the same length, which is how a class name used to run straight through the
+    confidence printed beside it.
+    """
+    txt = str(txt)
+    if _text_w(txt, scale) <= max_w:
+        return txt
+    while txt and _text_w(txt + "..", scale) > max_w:
+        txt = txt[:-1]
+    return txt + ".."
+
+
 DEFAULT_HOLD = 5          # frames; only for regions that run a model
 
 
@@ -2665,9 +2685,34 @@ def results_strip(width, rois, results, groups, period=""):
     """Every reading in one place, drawn on its own strip that is appended under
     the frame. Adding space is safer than drawing on top: with ten ROIs spread
     over the picture there is no free corner that is guaranteed to stay empty."""
-    line_h, pad, col_w = 18, 12, 200
-    ncol = max(1, min(4, (width - 2 * pad) // col_w))
-    rows = (len(rois) + ncol - 1) // ncol
+    line_h, pad, gap = 18, 12, 10
+    SC_IDX, SC_NAME, SC_VAL, SC_CONF = 0.36, 0.36, 0.44, 0.32
+
+    # Measure first, lay the columns out second. They used to sit at fixed
+    # offsets - the value at x+120 and the confidence at x+165 - while the
+    # value was allowed 22 characters. Anything longer than about five ran
+    # straight through its own score, so "Green_Apple" overwrote the number
+    # that said how sure it was. A column should be as wide as what is in it.
+    cells = []
+    for idx, roi in enumerate(rois):
+        res = results.get(roi["id"], {})
+        val = res.get("value")
+        readable = (val not in (None, "", False) and val != []
+                    and not (isinstance(val, str) and "?" in val))
+        cells.append(("%d" % (idx + 1), roi["name"], value_text(roi, val),
+                      "%.2f" % res.get("conf", 0.0), readable))
+
+    def _widest(i, scale, cap):
+        return min(cap, max([_text_w(c[i], scale) for c in cells] or [0]))
+
+    w_idx = _widest(0, SC_IDX, 24)
+    w_name = _widest(1, SC_NAME, 140)
+    w_val = _widest(2, SC_VAL, 230)
+    w_conf = _widest(3, SC_CONF, 40)
+    col_w = w_idx + w_name + w_val + w_conf + 4 * gap
+
+    ncol = max(1, min(4, (width - 2 * pad) // max(1, col_w)))
+    rows = max(1, (len(rois) + ncol - 1) // ncol)
     ghead = 34 * len(groups)
     height = 26 + ghead + rows * line_h + pad
 
@@ -2687,19 +2732,18 @@ def results_strip(width, rois, results, groups, period=""):
         _text(strip, "conf %.2f" % conf, (pad + 88 + tw, y + 2), 0.38, GREY)
 
     y += 26
-    for idx, roi in enumerate(rois):
-        c, r = idx // rows, idx % rows
+    for i, (num, name, sval, sconf, readable) in enumerate(cells):
+        c, r = i // rows, i % rows
         x = pad + c * col_w
         yy = y + r * line_h
-        res = results.get(roi["id"], {})
-        val = res.get("value")
-        readable = (val not in (None, "", False) and val != []
-                    and not (isinstance(val, str) and "?" in val))
-        s = value_text(roi, val)
-        _text(strip, "%2d" % (idx + 1), (x, yy), 0.36, TESR_GOLD_DEEP)
-        _text(strip, roi["name"][:15], (x + 22, yy), 0.36, GREY)
-        _text(strip, s[:22], (x + 120, yy), 0.44, WHITE if readable else TESR_RED)
-        _text(strip, "%.2f" % res.get("conf", 0.0), (x + 165, yy), 0.32, GREY)
+        x_name = x + w_idx + gap
+        x_val = x_name + w_name + gap
+        x_conf = x_val + w_val + gap
+        _text(strip, num.rjust(2), (x, yy), SC_IDX, TESR_GOLD_DEEP)
+        _text(strip, _fit_text(name, w_name, SC_NAME), (x_name, yy), SC_NAME, GREY)
+        _text(strip, _fit_text(sval, w_val, SC_VAL), (x_val, yy), SC_VAL,
+              WHITE if readable else TESR_RED)
+        _text(strip, sconf, (x_conf, yy), SC_CONF, GREY)
     if period:
         _text(strip, "period  " + str(period), (width - 240, 18), 0.4, TESR_GOLD_DEEP)
     return strip
@@ -3922,7 +3966,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.7.0";
+const STUDIO_VERSION = "1.7.1";
 
 const I18N = {
 th: {
