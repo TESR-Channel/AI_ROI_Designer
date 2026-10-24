@@ -538,7 +538,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.1"
+STUDIO_VERSION = "1.7.2"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -2237,7 +2237,17 @@ class OutputBus:
         if mq.get("enabled"):
             try:
                 import paho.mqtt.client as mqtt_client
-                self.mqtt = mqtt_client.Client()
+                # paho-mqtt 2.x wants to be told which callback signatures we
+                # use, and prints a DeprecationWarning in the middle of the
+                # startup log if it is not told - which reads like a fault when
+                # it is not one. Nothing here registers a callback (this bus
+                # only publishes), so version 2 is the quiet, correct answer.
+                # paho-mqtt 1.x has no such argument, hence the fallback.
+                try:
+                    self.mqtt = mqtt_client.Client(
+                        mqtt_client.CallbackAPIVersion.VERSION2)
+                except AttributeError:
+                    self.mqtt = mqtt_client.Client()
                 if mq.get("username"):
                     self.mqtt.username_pw_set(mq["username"], mq.get("password", ""))
                 self.mqtt.connect(mq.get("host", "localhost"), int(mq.get("port", 1883)), 60)
@@ -3966,7 +3976,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.7.1";
+const STUDIO_VERSION = "1.7.2";
 
 const I18N = {
 th: {
