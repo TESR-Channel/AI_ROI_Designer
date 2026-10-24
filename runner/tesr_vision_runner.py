@@ -59,7 +59,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.3.0"
+STUDIO_VERSION = "1.3.1"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -153,7 +153,19 @@ def names_of(value):
         return []                      # a counter's {'in':.., 'out':..} is not a name
     else:
         seq = [value]
-    return [v for v in seq if isinstance(v, str) and v not in ("", "empty")]
+
+    out = []
+    for v in seq:
+        # params.output = "items" publishes a list of DICTS, one per detection,
+        # with the name under "class". Reading only the strings here would make
+        # every verdict on an items region come back "empty" while the thing was
+        # sitting there detected, which is the exact failure the verdict exists
+        # to prevent. "name" is the browser preview's spelling of the same key.
+        if isinstance(v, dict):
+            v = v.get("class") or v.get("name")
+        if isinstance(v, str) and v not in ("", "empty"):
+            out.append(v)
+    return out
 
 
 def verdict_for(roi, value):
