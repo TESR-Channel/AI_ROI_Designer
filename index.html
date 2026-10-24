@@ -2605,9 +2605,9 @@ def run(cfg, args):
             fps = 0.9 * fps + 0.1 * (1.0 / dt) if dt > 0 else fps
 
             if show:
-                period = next(iter(ctx["counters"].values())).period if ctx["counters"] else ""
+                period_label = next(iter(ctx["counters"].values())).period if ctx["counters"] else ""
                 view = draw_overlay(frame.copy(), cam, results, fps, groups, show_panel,
-                                    ctx.get("tracks"), period)
+                                    ctx.get("tracks"), period_label)
                 cv2.imshow("TESR Vision Runner", view)
                 if args.test:
                     strip = debug_strip(debugs, view.shape[1])
