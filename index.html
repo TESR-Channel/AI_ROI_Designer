@@ -538,7 +538,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.2"
+STUDIO_VERSION = "1.7.3"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -2144,6 +2144,7 @@ def task_gauge(crop, roi):
 # Tasks that measure or count across the whole frame rather than inside a crop.
 # A counting line only means anything in the coordinates it was drawn on, so
 # these receive the frame itself plus a context carrying the camera scale.
+CONSOLE_MODES = ("summary", "change", "none")
 MODEL_TASKS = ("yolo_detect", "yolo_classify")
 
 FRAME_TASKS = ("level_line", "measure_line", "line_count", "zone_count")
@@ -2796,6 +2797,15 @@ def run(cfg, args):
             "configured. Pass --headless to mean this on purpose.", "WARN")
         show = False
     console = args.console or rt.get("console", "summary")
+    if console not in CONSOLE_MODES:
+        # argparse guards --console, but nothing guarded the config file, and an
+        # unrecognised value matched neither the "change" echo nor the "summary"
+        # line - so the runner started, loaded the model, and then printed
+        # nothing at all for the rest of its life. That looks exactly like a
+        # broken camera or a broken model, and costs an hour to tell apart.
+        log("console %r is not one of %s - using summary"
+            % (console, ", ".join(CONSOLE_MODES)), "WARN")
+        console = "summary"
 
     rois = [r for r in cam.get("rois", []) if r.get("enabled", True)]
     if not rois:
@@ -3976,7 +3986,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.7.2";
+const STUDIO_VERSION = "1.7.3";
 
 const I18N = {
 th: {
