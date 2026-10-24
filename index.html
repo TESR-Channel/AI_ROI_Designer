@@ -194,8 +194,9 @@
   <button id="btnImport" data-i18n="importConfig"></button>
   <button id="btnRuntime" data-i18n="runtimeSettings"></button>
   <button id="btnJson" data-i18n="viewJson"></button>
+  <button id="btnProject" data-i18n="saveProject"></button>
   <button id="btnPy" class="primary" data-i18n="exportBtn"></button>
-  <input type="file" id="fileImport" accept="application/json" hidden>
+  <input type="file" id="fileImport" accept=".json,.zip,application/json,application/zip" hidden>
 </header>
 
 <main>
@@ -538,7 +539,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.4.0"
+STUDIO_VERSION = "1.5.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -697,9 +698,22 @@ def gui_available():
     as stubs that raise. Asking once, instead of finding out from an exception
     while shutting down, is the difference between "running headless" and
     "crashed on exit".
+
+    There is a second way to have no GUI, and it is the common one: a full
+    OpenCV build on a machine with no display, which is what you get the moment
+    you SSH into a Raspberry Pi. destroyAllWindows() succeeds there because it
+    touches nothing, and then imshow() calls abort() inside Qt - a process
+    death, not a Python exception, so no try/except can catch it and the
+    readings stop with a wall of Qt text and no explanation. Asking the
+    environment first is the only thing that works.
     """
     global _GUI
     if _GUI is None:
+        if (platform.system() == "Linux"
+                and not os.environ.get("DISPLAY")
+                and not os.environ.get("WAYLAND_DISPLAY")):
+            _GUI = False
+            return _GUI
         try:
             cv2.destroyAllWindows()
             _GUI = True
@@ -2660,9 +2674,11 @@ def run(cfg, args):
     rt = cfg["runtime"]
     show = (rt.get("show_window", True) or args.test) and not args.headless
     if show and not gui_available():
-        log("this OpenCV build has no GUI (opencv-python-headless) - running "
-            "without a window. Readings still go to the console and to every "
-            "output you configured.", "WARN")
+        log("no window available here - either this OpenCV has no GUI "
+            "(opencv-python-headless) or there is no display attached, which "
+            "is what an SSH session looks like. Running without a window; "
+            "readings still go to the console and to every output you "
+            "configured. Pass --headless to mean this on purpose.", "WARN")
         show = False
     console = args.console or rt.get("console", "summary")
 
@@ -3821,12 +3837,16 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.4.0";
+const STUDIO_VERSION = "1.5.0";
 
 const I18N = {
 th: {
   /* header + chrome */
   projectName:"ชื่อโปรเจกต์", importConfig:"นำเข้า config", runtimeSettings:"ตั้งค่า Runtime",
+  saveProject:"บันทึกโปรเจกต์ (.zip)",
+  projectSaved:"บันทึกโปรเจกต์แล้ว — ไฟล์เดียวจบ ทั้งแก้ต่อและรันได้",
+  projectOpened:"เปิดโปรเจกต์แล้ว โมเดลติดกลับมาให้เรียบร้อย",
+  dupDeploy:"มีโมเดลมากกว่าหนึ่งตัวใช้ชื่อไฟล์เดียวกัน จะชนกันทั้งในโฟลเดอร์และบนเครื่องจริง — แก้ชื่อก่อน: ",
   viewJson:"ดู JSON", exportBtn:"ส่งออก config + Python",
 
   /* cameras */
@@ -4085,6 +4105,10 @@ th: {
 
 en: {
   projectName:"Project name", importConfig:"Import config", runtimeSettings:"Runtime settings",
+  saveProject:"Save project (.zip)",
+  projectSaved:"Project saved — one file to carry on from, and to run",
+  projectOpened:"Project opened, models attached",
+  dupDeploy:"Two models share one deployed filename; they would collide in the folder and on the device. Rename one first: ",
   viewJson:"View JSON", exportBtn:"Export config + Python",
 
   camerasTitle:"Cameras / stations", addCamera:"+ Add camera", cameraSettings:"Selected camera",
@@ -7992,6 +8016,138 @@ function buildConfig(includeRef){
     }))
   };
 }
+/* ==================================================================
+   A project file: everything needed to carry on, and everything
+   needed to run
+   ------------------------------------------------------------------
+   Two complaints with one cause. Coming back to a job meant redrawing
+   every region, because a config carries the model's FILENAME and never
+   the model. And an export was not ready to run for the same reason -
+   you had to go and find model.onnx yourself, which catches somebody
+   out in every workshop.
+
+   So: one .zip holding the config, the models themselves, the runner,
+   the engine when the layout needs it, and a README. Drop it on a
+   device and it runs; hand it back to this page and you are where you
+   left off. The models still never leave your machine - this file is
+   written in the browser and downloaded, nothing is uploaded.
+
+   Written with no library. A ZIP is a simple format if you do not
+   compress: an ONNX file is already dense enough that deflate buys
+   little, and store-only means no async compression step and nothing
+   to go wrong on a browser that lacks CompressionStream.
+   ================================================================== */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for(let i = 0; i < 256; i++){
+    let c = i;
+    for(let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes){
+  let c = 0xFFFFFFFF;
+  for(let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function dosTime(d){
+  return ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF;
+}
+function dosDate(d){
+  return (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+}
+
+/* entries: [{name, data: Uint8Array}] -> Blob */
+function zipWrite(entries){
+  const enc = new TextEncoder(), now = new Date();
+  const time = dosTime(now), date = dosDate(now);
+  const locals = [], centrals = [];
+  let offset = 0;
+
+  entries.forEach(e => {
+    const name = enc.encode(e.name);
+    const crc = crc32(e.data), size = e.data.length;
+
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true);
+    lh.setUint16(6, 0, true); lh.setUint16(8, 0, true);        // flags, method 0 = store
+    lh.setUint16(10, time, true); lh.setUint16(12, date, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true);
+    lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    locals.push(new Uint8Array(lh.buffer), name, e.data);
+
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, time, true); ch.setUint16(14, date, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true);
+    ch.setUint16(28, name.length, true); ch.setUint16(30, 0, true); ch.setUint16(32, 0, true);
+    ch.setUint16(34, 0, true); ch.setUint16(36, 0, true); ch.setUint32(38, 0, true);
+    ch.setUint32(42, offset, true);
+    centrals.push(new Uint8Array(ch.buffer), name);
+
+    offset += 30 + name.length + size;
+  });
+
+  const cdSize = centrals.reduce((n, p) => n + p.length, 0);
+  const eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0, 0x06054b50, true);
+  eo.setUint16(8, entries.length, true); eo.setUint16(10, entries.length, true);
+  eo.setUint32(12, cdSize, true); eo.setUint32(16, offset, true);
+
+  return new Blob(locals.concat(centrals, [new Uint8Array(eo.buffer)]),
+                  {type: "application/zip"});
+}
+
+/* Uint8Array of a .zip -> Map(name -> Uint8Array). Reads store and deflate,
+   because a zip handed back to us may have been rebuilt by any tool. */
+async function zipRead(buf){
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const dec = new TextDecoder();
+  let eocd = -1;
+  for(let i = buf.length - 22; i >= 0 && i > buf.length - 66000; i--){
+    if(dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+  }
+  if(eocd < 0) throw new Error("not a zip file");
+
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const out = new Map();
+
+  for(let n = 0; n < count; n++){
+    if(dv.getUint32(p, true) !== 0x02014b50) throw new Error("damaged zip directory");
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const cmtLen = dv.getUint16(p + 32, true);
+    const local = dv.getUint32(p + 42, true);
+    const name = dec.decode(buf.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + cmtLen;
+
+    // the local header repeats the name and may carry a different extra field
+    const lNameLen = dv.getUint16(local + 26, true);
+    const lExtraLen = dv.getUint16(local + 28, true);
+    const start = local + 30 + lNameLen + lExtraLen;
+    const raw = buf.subarray(start, start + compSize);
+
+    if(method === 0){ out.set(name, raw); continue; }
+    if(method === 8){
+      if(typeof DecompressionStream !== "function")
+        throw new Error("this browser cannot read a compressed zip - save the project again from this page");
+      const ds = new DecompressionStream("deflate-raw");
+      const ab = await new Response(new Blob([raw]).stream().pipeThrough(ds)).arrayBuffer();
+      out.set(name, new Uint8Array(ab));
+      continue;
+    }
+    throw new Error("unsupported compression in " + name);
+  }
+  return out;
+}
+
 function download(name, text, mime){
   const b = new Blob([text], {type: mime || "text/plain;charset=utf-8"});
   const a = document.createElement("a");
@@ -8029,6 +8185,176 @@ P("btnPy").onclick = () => {
     P("dlg").showModal();
   }, 700);
 };
+function downloadBlob(name, blob){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+}
+
+/* every model actually referenced by a region or a camera detector */
+function modelsInUse(){
+  const used = new Set();
+  state.cameras.forEach(c => {
+    (c.rois || []).forEach(r => { if(r.model && r.model.id) used.add(r.model.id); });
+    if(c.detector && c.detector.id) used.add(c.detector.id);
+  });
+  return models.filter(m => used.has(m.id));
+}
+
+function projectReadme(cfgName, mdls){
+  const lines = [
+    "TESR ROI Studio - project file",
+    "==============================",
+    "Saved by Studio v" + STUDIO_VERSION + " on " + new Date().toISOString().slice(0, 19).replace("T", " "),
+    "",
+    "TO CARRY ON EDITING",
+    "  Open " + location.href.split("#")[0],
+    "  press Import config, and choose this .zip. The regions, the reference",
+    "  image and the models all come back, already attached.",
+    "",
+    "TO RUN IT",
+    "  Unzip the whole thing into one folder and run from THAT folder -",
+    "  the runner looks for the model beside itself, not beside the config.",
+    "",
+    "    python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 0 --test",
+    "    python tesr_vision_runner.py --config " + cfgName + " --image photo.jpg --once",
+    "    python tesr_vision_runner.py --config " + cfgName + " --headless",
+    "",
+    "  python3 rather than python on a Raspberry Pi or a Jetson.",
+    "  A ribbon camera is --camera csi, a network camera is",
+    "  --camera ip --source rtsp://...",
+    "",
+    "WHAT IS IN HERE",
+    "  " + cfgName + "   the regions, their parameters and the reference image",
+    "  tesr_vision_runner.py" + (needsLineEngine()
+        ? "\n  tesr_line_engine.py    this layout has a line or a zone, so it needs this too" : ""),
+    "  project.json           the Studio's own notes, so it can put everything back",
+  ];
+  mdls.forEach(m => lines.push("  " + m.deploy + "   " + m.type + ", " +
+    (m.names.length ? m.names.length + " classes: " + m.names.join(", ") : "no class names") +
+    ", imgsz " + m.size));
+  if(!mdls.length) lines.push("  (no model is attached to any region)");
+  lines.push("", "Install once:  pip install opencv-python numpy onnxruntime", "");
+  return lines.join("\n");
+}
+
+async function saveProject(){
+  const enc = new TextEncoder();
+  const name = slug(P("projName").value);
+  const cfgName = name + "_config.json";
+  const mdls = modelsInUse();
+
+  // Two models deployed under one filename collide in the folder, and would
+  // collide on the device too - say so here rather than letting one win.
+  const seen = {};
+  const clash = mdls.filter(m => (seen[m.deploy] = (seen[m.deploy] || 0) + 1) > 1);
+  if(clash.length){ toast(t("dupDeploy") + clash[0].deploy); return; }
+
+  const entries = [{name: cfgName,
+                    data: enc.encode(JSON.stringify(buildConfig(true), null, 2))}];
+
+  const manifest = {
+    schema: "tesr.roi.project.v1",
+    studio_version: STUDIO_VERSION,
+    saved: new Date().toISOString(),
+    config: cfgName,
+    models: mdls.map(m => ({id: m.id, name: m.name, type: m.type, size: m.size,
+                            conf: m.conf, iou: m.iou, names: m.names,
+                            deploy: m.deploy, file: m.deploy}))
+  };
+  // the model sits at the ROOT under its deployed name, so unzipping gives a
+  // folder the runner can work in with nothing moved
+  mdls.forEach(m => entries.push({name: m.deploy, data: m.bytes}));
+  entries.push({name: "project.json", data: enc.encode(JSON.stringify(manifest, null, 2))});
+  entries.push({name: "tesr_vision_runner.py",
+                data: enc.encode(document.getElementById("runnerSrc").textContent)});
+  if(needsLineEngine())
+    entries.push({name: "tesr_line_engine.py",
+                  data: enc.encode(document.getElementById("lineSrc").textContent)});
+  entries.push({name: "README.txt", data: enc.encode(projectReadme(cfgName, mdls))});
+
+  const blob = zipWrite(entries);
+  downloadBlob(name + "_project.zip", blob);
+  toast(t("projectSaved") + " (" + (blob.size / 1048576).toFixed(1) + " MB, " +
+        mdls.length + " " + t("classesCount") + ")");
+}
+
+async function openProject(file){
+  const files = await zipRead(new Uint8Array(await file.arrayBuffer()));
+  const dec = new TextDecoder();
+
+  let manifest = null;
+  if(files.has("project.json")){
+    try{ manifest = JSON.parse(dec.decode(files.get("project.json"))); }catch(e){ manifest = null; }
+  }
+  // the config is whatever the manifest names, or the only *_config.json there
+  let cfgRaw = manifest && files.get(manifest.config);
+  if(!cfgRaw){
+    const key = [...files.keys()].find(k => /(^|\/)[^\/]*config\.json$/i.test(k) && k !== "project.json");
+    if(key) cfgRaw = files.get(key);
+  }
+  if(!cfgRaw) throw new Error("no config.json inside that file");
+  const cfg = JSON.parse(dec.decode(cfgRaw));
+
+  const restored = [];
+  if(manifest && manifest.models && manifest.models.length){
+    manifest.models.forEach(m => {
+      const data = files.get(m.file) || files.get(m.deploy);
+      if(!data) return;
+      const rec = {id: m.id || uid("m"), name: m.name || "model",
+                   type: m.type || "detect", size: m.size || 640,
+                   conf: m.conf != null ? m.conf : 0.25,
+                   iou: m.iou != null ? m.iou : 0.45,
+                   names: m.names || [], deploy: m.deploy || m.file, bytes: data};
+      const i = models.findIndex(x => x.id === rec.id);
+      if(i >= 0) models[i] = rec; else models.push(rec);
+      dbPut(rec); restored.push(rec);
+    });
+  } else {
+    // No manifest - a zip somebody assembled by hand. Every .onnx in it can
+    // still describe itself, which is the whole point of reading the metadata.
+    files.forEach((data, nm) => {
+      if(!/\.onnx$/i.test(nm)) return;
+      const meta = onnxMeta(data);
+      let size = 640;
+      try{
+        const a = JSON.parse(meta.imgsz || "null");
+        size = Array.isArray(a) ? +a[0] : (+meta.imgsz || 640);
+      }catch(e){ size = +meta.imgsz || 640; }
+      const rec = {id: uid("m"), name: nm.split("/").pop().replace(/\.onnx$/i, ""),
+                   type: meta.task === "classify" ? "classify" : "detect",
+                   size: size || 640, conf: 0.25, iou: 0.45,
+                   names: onnxClasses(meta) || [], deploy: nm.split("/").pop(), bytes: data};
+      models.push(rec); dbPut(rec); restored.push(rec);
+    });
+  }
+
+  loadConfig(cfg);
+
+  // Put each region back on its model. The config records the DEPLOYED
+  // filename and never the browser's handle, so that name is the join.
+  let linked = 0;
+  const find = p => restored.find(x => x.deploy === p) || models.find(x => x.deploy === p);
+  state.cameras.forEach(c => {
+    (c.rois || []).forEach(r => {
+      if(!r.model || !r.model.path) return;
+      const m = find(r.model.path);
+      if(m){ r.model.id = m.id; linked++; }
+    });
+    if(c.detector && c.detector.path){
+      const m = find(c.detector.path);
+      if(m) c.detector.id = m.id;
+    }
+  });
+
+  renderModels(); renderAll(); syncProps();
+  restored.forEach(m => { getSession(m).catch(() => {}); });   // warm up Test now
+  toast(t("projectOpened") + " · " + restored.length + " model, " + linked + " ROI");
+}
+
+P("btnProject").onclick = () => { saveProject().catch(e => toast(t("badFile") + e.message)); };
+
 function needsLineEngine(){
   return state.cameras.some(c => (c.rois || []).some(
     r => ["level_line","measure_line","line_count","zone_count"].indexOf(r.task) >= 0));
@@ -8143,6 +8469,12 @@ cams,
 P("btnImport").onclick = () => P("fileImport").click();
 P("fileImport").onchange = e => {
   const f = e.target.files[0]; if(!f) return;
+  e.target.value = "";
+  // one button for both: a config on its own, or a whole project
+  if(/\.zip$/i.test(f.name)){
+    openProject(f).catch(err => toast(t("badFile") + err.message));
+    return;
+  }
   const fr = new FileReader();
   fr.onload = () => {
     try{
@@ -8150,7 +8482,7 @@ P("fileImport").onchange = e => {
       loadConfig(cfg); toast(t("configImported"));
     }catch(err){ toast(t("badFile") + err.message); }
   };
-  fr.readAsText(f); e.target.value = "";
+  fr.readAsText(f);
 };
 function loadConfig(cfg){
   P("projName").value = cfg.project || "TESR Vision Project";
