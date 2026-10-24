@@ -417,7 +417,8 @@
       <div><label>iou</label><input id="mdIou" type="number" value="0.45" min="0" max="1" step="0.05"></div>
       <div style="grid-column:1/-1">
         <label data-i18n="classNames"></label>
-        <textarea id="mdClasses" rows="4" placeholder="ok&#10;ng&#10;missing"></textarea>
+        <textarea id="mdClasses" rows="4"></textarea>
+        <div class="hint" id="mdOrder" style="display:none"></div>
         <div class="hint" data-i18n-html="classNamesHint"></div>
       </div>
     </div>
@@ -535,7 +536,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.1.0"
+STUDIO_VERSION = "1.2.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -586,6 +587,50 @@ def log(msg, level="INFO"):
 
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def names_of(value):
+    """Whatever a region published, as a plain list of class names.
+
+    A detect region set to publish class names gives a LIST: [] for an empty
+    region, one name for a filled one, occasionally two when the crop catches
+    the edge of its neighbour. A classify region gives a single string. Both
+    are handled, so changing a region's task later does not quietly change the
+    meaning of every verdict built on it.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        seq = value
+    elif isinstance(value, dict):
+        return []                      # a counter's {'in':.., 'out':..} is not a name
+    else:
+        seq = [value]
+    return [v for v in seq if isinstance(v, str) and v not in ("", "empty")]
+
+
+def verdict_for(roi, value):
+    """ok / wrong / empty for one reading, or None when there is nothing to judge.
+
+    This never changes what the region detected or published. It is only an
+    opinion about what SHOULD have been there, taken from params.expect, which
+    the Studio sets from a dropdown of the model's own class list.
+
+    Deliberately NOT a filter. A region that discarded the wrong part would
+    report an empty slot instead of a fault, and "empty" is the one answer an
+    inspection station must never give while the wrong thing sits in front of
+    the camera.
+    """
+    expect = (roi.get("params") or {}).get("expect")
+    if not expect:
+        return None
+    # a count has no names in it, so it cannot answer "is this the right part"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return None
+    found = names_of(value)
+    if not found:
+        return "empty"
+    return "ok" if expect in found else "wrong"
 
 
 _GUI = None
@@ -671,6 +716,19 @@ def load_config(path):
         rt[key] = merged
     cfg["runtime"] = rt
     cfg.setdefault("cameras", [])
+
+    # An expected class on a region that only publishes a NUMBER can never be
+    # judged - a count carries no names. Silence here would look like a station
+    # that simply never finds a fault, so say it once at startup instead.
+    for cam in cfg["cameras"]:
+        for roi in cam.get("rois") or []:
+            p = roi.get("params") or {}
+            if p.get("expect") and roi.get("task") == "yolo_detect" \
+                    and p.get("output", "count") == "count":
+                log("region '%s' expects '%s' but publishes a count, which has "
+                    "no class names in it - no verdict can be reached. Set "
+                    "Value to output = Class names for this region."
+                    % (roi.get("name"), p["expect"]), "WARN")
     return cfg
 
 
@@ -2026,9 +2084,16 @@ class OutputBus:
         ts = now_iso()
         rec = {"time": ts, "project": self.project, "camera": self.cam_id,
                "roi": roi["name"], "key": key, "value": value, "conf": round(conf, 3)}
+        # An expected class adds an opinion; it never alters what was read, so
+        # "value" above is the same whether or not anybody set an expectation.
+        verdict = verdict_for(roi, value)
+        if verdict:
+            rec["expect"] = (roi.get("params") or {}).get("expect")
+            rec["verdict"] = verdict
         if echo and self.rt.get("print_console"):
-            print("%s  %-14s %-10s = %s  (conf %.2f)"
-                  % (ts, roi["name"], key, value, conf), flush=True)
+            print("%s  %-14s %-10s = %s  (conf %.2f)%s"
+                  % (ts, roi["name"], key, value, conf,
+                     ("  [%s]" % verdict) if verdict else ""), flush=True)
         if self.jsonl:
             self.jsonl.write(json.dumps(rec, ensure_ascii=False) + "\n")
             self.jsonl.flush()
@@ -3598,7 +3663,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.1.0";
+const STUDIO_VERSION = "1.2.0";
 
 const I18N = {
 th: {
@@ -3722,6 +3787,10 @@ th: {
   pModelUse:"โมเดลที่ใช้", pickModel:"— เลือกโมเดล —", noModelYet:"— ยังไม่มีโมเดล กด + เพิ่มโมเดล —",
   classesCount:"คลาส", pOutput:"ค่าที่ส่งออก", outCount:"จำนวนที่เจอ", outClasses:"รายชื่อคลาส",
   outItems:"รายละเอียดทั้งหมด", pFilterClasses:"กรองเฉพาะคลาส",
+  pExpect:"คลาสที่ควรอยู่ตรงนี้", expectAny:"— อะไรก็ได้ (ไม่ตัดสิน) —",
+  expectUnknown:"(ไม่มีในโมเดลนี้)",
+  expectHint:"ไม่กรองอะไรทั้งสิ้น — ยังเห็นทุกคลาสเหมือนเดิม แค่เพิ่มคำตัดสิน ok / wrong / empty ให้ทุกค่าที่อ่านได้",
+  expectNoNames:"เลือกโมเดลก่อน แล้วรายชื่อคลาสจะขึ้นมาให้เลือกตรงนี้",
   filterPh:"เว้นว่าง = ทุกคลาส เช่น person,helmet", pDeployName:"ชื่อไฟล์โมเดลตอน deploy",
   pReadQr:"อ่าน QR", pReadBarcode:"อ่านบาร์โค้ดแท่ง",
   barcodeFormats:"รองรับ QR · Code 128 · Code 39 · EAN-13 · UPC-A · EAN-8 · ITF<br>ทุกฟอร์แมตตรวจ checksum ก่อนตอบ จึงมักจะ<b>อ่านไม่เจอ</b> มากกว่า<b>อ่านผิด</b><br>วางกรอบให้คลุมทั้งบาร์โค้ดรวมขอบขาวซ้ายขวา และให้แท่งตั้งตรง (เอียงได้ราว 8°)",
@@ -3824,7 +3893,9 @@ th: {
   modelNick:"ชื่อเรียก", modelNickPh:"เช่น defect_v3", modelKind:"ชนิด",
   modelSize:"ขนาด input (imgsz)", modelDeployName:"ชื่อไฟล์ตอน deploy บน Python",
   classNames:"ชื่อคลาส (บรรทัดละ 1 ชื่อ หรือคั่นด้วยจุลภาค ตามลำดับ index)",
-  classNamesHint:"ถ้าเว้นว่าง จะแสดงเป็นเลข index แทน · วางเนื้อหาจากช่อง <b>names</b> ใน data.yaml ได้เลย",
+  classNamesHint:"ชื่อจับคู่<b>ตามลำดับ</b> สลับลำดับเมื่อไร ป้ายผิดทั้งหมดโดยไม่มีอะไรเตือน · ถ้าเว้นว่างจะแสดงเป็นเลข index แทน",
+  namesFromFile:"อ่านจากไฟล์โมเดลแล้ว:",
+  namesNotInFile:"ไฟล์นี้ไม่ได้พกชื่อคลาสมาด้วย — ดู classes.txt ที่อยู่ข้างกัน ลำดับบรรทัดคือลำดับ index แล้วพิมพ์ให้ตรงลำดับนั้น",
   modelPrivacy:'โมเดลถูกเก็บไว้ในเบราว์เซอร์ของเครื่องนี้เท่านั้น ไม่มีการอัปโหลดไปที่ใด<br>ตอนกดส่งออก config ระบบจะใส่ชื่อไฟล์โมเดลลงใน config ให้ แต่ไฟล์ .onnx ต้องคัดลอกไปวางข้าง ๆ <span class="kbd">tesr_vision_runner.py</span> เอง',
   rtFps:"Loop FPS สูงสุด", rtShow:"แสดงหน้าต่างภาพ", rtShowYes:"แสดง", rtShowNo:"ไม่แสดง (headless)",
   rtCsv:"บันทึก CSV", rtJsonl:"บันทึก JSONL", rtSave:"เก็บภาพเมื่อค่าเปลี่ยน",
@@ -3966,6 +4037,10 @@ en: {
   pModelUse:"Model to use", pickModel:"— pick a model —", noModelYet:"— no models yet, press + Add a trained model —",
   classesCount:"classes", pOutput:"Value to output", outCount:"Number found", outClasses:"Class names",
   outItems:"Full details", pFilterClasses:"Keep only these classes",
+  pExpect:"Expected class here", expectAny:"— anything (no verdict) —",
+  expectUnknown:"(not in this model)",
+  expectHint:"Filters nothing — every class is still detected. It only adds an ok / wrong / empty verdict to each reading",
+  expectNoNames:"Pick a model above and its class list appears here",
   filterPh:"blank = all classes, e.g. person,helmet", pDeployName:"Model filename at deploy time",
   pReadQr:"Read QR", pReadBarcode:"Read linear barcodes",
   barcodeFormats:"Supports QR · Code 128 · Code 39 · EAN-13 · UPC-A · EAN-8 · ITF<br>Every format is checksum-validated, so it will <b>fail to read</b> far more often than it will <b>read wrong</b><br>Frame the whole barcode including the white quiet zones, and keep the bars upright (about 8° of tilt is fine)",
@@ -4064,7 +4139,9 @@ en: {
   modelNick:"Display name", modelNickPh:"e.g. defect_v3", modelKind:"Kind",
   modelSize:"Input size (imgsz)", modelDeployName:"Filename when deployed with Python",
   classNames:"Class names (one per line, or comma separated, in index order)",
-  classNamesHint:"Leave blank to show index numbers instead · you can paste straight from the <b>names</b> field of data.yaml",
+  classNamesHint:"Names are matched <b>by position</b>. One name out of order relabels every detection and nothing warns you · leave blank to show index numbers instead",
+  namesFromFile:"Read from the model file:",
+  namesNotInFile:"This file carries no class names — open classes.txt next to it, where the line order IS the index order, and type them in that order",
   modelPrivacy:'The model stays in this browser on this machine. Nothing is uploaded anywhere.<br>Exporting a config records the model filename, but you still need to copy the .onnx file next to <span class="kbd">tesr_vision_runner.py</span> yourself.',
   rtFps:"Max loop FPS", rtShow:"Show the video window", rtShowYes:"Show", rtShowNo:"Hide (headless)",
   rtCsv:"Write CSV", rtJsonl:"Write JSONL", rtSave:"Save an image when the value changes",
@@ -4489,12 +4566,25 @@ function drawRoi(roi, active){
     const top = pts.reduce((m, p) => p.y < m.y ? p : m, pts[0]);
     const shown = res && res.value !== null && res.value !== undefined && res.value !== ""
                   ? String(res.value) : null;
-    const txt = shown !== null ? roi.name + "  =  " + shown : roi.name + "  ·  " + roi.task;
+    /* An expected class turns the label into a verdict you can read across a
+       room. An empty region is amber, not red: nobody has filled it yet, which
+       is not the same as the wrong part being in it. */
+    const vd = res ? verdictOf(roi, res.value) : null;
+    let txt, bar = col;
+    if(vd){
+      const mark = vd === "ok" ? "  OK"
+                 : vd === "wrong" ? "  WRONG, want " + (roi.params.expect || "")
+                 : "  EMPTY";
+      txt = roi.name + "  =  " + (shown !== null ? shown : "[]") + mark;
+      bar = vd === "ok" ? "#46C06E" : vd === "wrong" ? "#F30006" : "#E6A23C";
+    } else {
+      txt = shown !== null ? roi.name + "  =  " + shown : roi.name + "  ·  " + roi.task;
+    }
     ctx.font = "11px ui-monospace, monospace";
     const w = ctx.measureText(txt).width + 10;
     ctx.fillStyle = "rgba(11,11,11,.88)";
     ctx.fillRect(top.x, top.y - 19, w, 16);
-    ctx.fillStyle = col; ctx.fillRect(top.x, top.y - 19, 3, 16);
+    ctx.fillStyle = bar; ctx.fillRect(top.x, top.y - 19, 3, 16);
     ctx.fillStyle = "#F2F2F2"; ctx.fillText(txt, top.x + 7, top.y - 7);
   }
 
@@ -5002,6 +5092,47 @@ function renderTaskParams(r){
       syncProps(); updatePreview();
     };
     add(field(t("pModelUse"), pick));
+
+    /* What SHOULD be in this region.
+
+       This deliberately does NOT filter. A region that throws away the wrong
+       part reports an empty slot rather than a fault - and "empty" is the one
+       answer an inspection station must never give when something wrong is
+       sitting right there in front of the camera. The model still detects
+       everything; this only decides the verdict. Filtering is the separate
+       control below, for regions where something irrelevant is genuinely in
+       shot and should be ignored. */
+    const picked = models.find(x => x.id === (r.model && r.model.id));
+    const known = (picked && picked.names && picked.names.length)
+                    ? picked.names
+                    : (r.model.class_names || []);
+    const exp = document.createElement("select");
+    const anyOpt = document.createElement("option");
+    anyOpt.value = ""; anyOpt.textContent = t("expectAny");
+    exp.appendChild(anyOpt);
+    known.forEach((n, i) => {
+      const o = document.createElement("option");
+      o.value = n;
+      o.textContent = i + "   " + n;          // the index is the thing to see
+      exp.appendChild(o);
+    });
+    // a name that came in from a config file, or was set before the model was
+    // picked, must stay selectable rather than silently resetting to "any"
+    if(p.expect && known.indexOf(p.expect) < 0){
+      const o = document.createElement("option");
+      o.value = p.expect; o.textContent = p.expect + "   " + t("expectUnknown");
+      exp.appendChild(o);
+    }
+    exp.value = p.expect || "";
+    exp.onchange = () => {
+      if(exp.value) p.expect = exp.value; else delete p.expect;
+      syncProps(); updatePreview();
+    };
+    add(field(t("pExpect"), exp));
+    const expHint = document.createElement("div");
+    expHint.className = "hint";
+    expHint.textContent = known.length ? t("expectHint") : t("expectNoNames");
+    add(expHint);
 
     add(rowOf([field("conf", num(r.model,"conf",{min:0,max:1,step:0.05})),
                field("iou", num(r.model,"iou",{min:0,max:1,step:0.05})),
@@ -6676,6 +6807,121 @@ async function getSession(model){
   return model.session;
 }
 
+/* ------------------------------------------------------------------
+   What a model already knows about itself
+   ------------------------------------------------------------------
+   An .onnx file is a protobuf, and ModelProto field 14 is metadata_props:
+   repeated StringStringEntryProto, key in field 1 and value in field 2.
+   Ultralytics and the TESR trainer both write the class list there as JSON
+   under "names", along with "imgsz" and "task".
+
+   That matters more than it sounds. Class names are matched BY POSITION, so
+   one name typed out of order silently relabels every detection - the system
+   keeps running and keeps being wrong. The order travels inside the model, so
+   nobody should ever be typing it from memory. We read it instead.
+
+   Only the top level of the message is walked. The graph is one big
+   length-delimited field and is skipped whole, so this stays quick even on a
+   large model. Anything unreadable just yields nothing and the fields stay
+   as the user left them. */
+function onnxMeta(bytes){
+  const out = {};
+  const dec = new TextDecoder();
+  let i = 0;
+  const varint = () => {
+    let v = 0, s = 0, b;
+    do{
+      if(i >= bytes.length) throw new Error("end");
+      b = bytes[i++];
+      v += (b & 0x7f) * Math.pow(2, s);
+      s += 7;
+    }while(b & 0x80);
+    return v;
+  };
+  const skip = wire => {
+    if(wire === 0) varint();
+    else if(wire === 1) i += 8;
+    else if(wire === 5) i += 4;
+    // read the length FIRST: varint() moves i itself, and "i += varint()"
+    // would add the length to the old i and throw that move away
+    else if(wire === 2){ const n = varint(); i += n; }
+    else throw new Error("wire " + wire);
+  };
+  try{
+    while(i < bytes.length){
+      const tag = varint(), field = Math.floor(tag / 8), wire = tag % 8;
+      if(field !== 14){ skip(wire); continue; }
+      if(wire !== 2){ skip(wire); continue; }
+      const entryLen = varint(), end = i + entryLen;
+      let k = "", v = "";
+      while(i < end){
+        const t2 = varint(), f2 = Math.floor(t2 / 8), w2 = t2 % 8;
+        if(w2 !== 2){ skip(w2); continue; }
+        const len = varint();
+        const s = dec.decode(bytes.subarray(i, i + len));
+        i += len;
+        if(f2 === 1) k = s; else if(f2 === 2) v = s;
+      }
+      i = end;
+      if(k) out[k] = v;
+    }
+  }catch(e){ /* truncated, or not an ONNX file at all - keep what we got */ }
+  return out;
+}
+
+/* The class list, in index order, or null if the model carries none.
+
+   Two shapes turn up in the wild and only one of them is JSON. The TESR
+   trainer writes {"0":"Red_Apple","1":"Green_Apple"}. Ultralytics writes
+   str(dict) instead, which comes out as {0: 'person', 1: 'bicycle'} - single
+   quotes, bare integer keys, not parseable as JSON at all. Since a learner is
+   as likely to bring one as the other, both are read by pulling index/name
+   pairs out directly, which also survives a stray trailing comma. */
+function onnxClasses(meta){
+  if(!meta || !meta.names) return null;
+  const raw = meta.names;
+
+  // the index may be quoted ("0") or bare (0) depending on who wrote the file
+  const pairs = [], re = /["']?(\d+)["']?\s*:\s*(?:'([^']*)'|"([^"]*)")/g;
+  let m;
+  while((m = re.exec(raw))) pairs.push([+m[1], m[2] !== undefined ? m[2] : m[3]]);
+  if(pairs.length){
+    pairs.sort((a, b) => a[0] - b[0]);
+    return pairs.map(p => p[1]);
+  }
+
+  // a plain list rather than a map: ["a","b"] or ['a','b']
+  try{
+    const d = JSON.parse(raw);
+    if(Array.isArray(d) && d.length) return d.map(String);
+    if(d && typeof d === "object"){
+      const keys = Object.keys(d).sort((a, b) => (+a) - (+b));
+      if(keys.length) return keys.map(k => String(d[k]));
+    }
+  }catch(e){ /* fall through to the quoted-string reading below */ }
+  if(/^\s*\[/.test(raw)){
+    const list = raw.match(/'([^']*)'|"([^"]*)"/g);
+    if(list && list.length) return list.map(s => s.slice(1, -1));
+  }
+  return null;
+}
+
+/* ok / wrong / empty for one reading, or null when there is nothing to judge.
+   The exported runner has the same rule in verdict_for() - if you change one,
+   change the other, or the preview and the device will disagree. */
+function verdictOf(roi, value){
+  const expect = (roi.params || {}).expect;
+  if(!expect) return null;
+  if(typeof value === "number") return null;   // a count carries no names
+  let seq;
+  if(value === null || value === undefined) seq = [];
+  else if(Array.isArray(value)) seq = value;
+  else seq = [value];
+  const found = seq.filter(v => typeof v === "string" && v !== "" && v !== "empty");
+  if(!found.length) return "empty";
+  return found.indexOf(expect) >= 0 ? "ok" : "wrong";
+}
+
 /* run one model over one crop canvas */
 async function runModel(model, canvas){
   const ort = await loadOrt();
@@ -7467,6 +7713,7 @@ P("btnAddModel").onclick = () => {
   pendingBytes = null;
   P("mdFile").value = ""; P("mdFileInfo").textContent = t("noFileChosen");
   P("mdName").value = ""; P("mdClasses").value = ""; P("mdDeploy").value = "";
+  P("mdOrder").textContent = ""; P("mdOrder").style.display = "none";
   P("dlgModel").showModal();
 };
 P("mdCancel").onclick = () => P("dlgModel").close();
@@ -7477,8 +7724,51 @@ P("mdFile").onchange = e => {
     P("mdFileInfo").textContent = f.name + " · " + (f.size/1048576).toFixed(1) + " MB";
     if(!P("mdName").value) P("mdName").value = f.name.replace(/\.onnx$/i, "");
     if(!P("mdDeploy").value) P("mdDeploy").value = f.name;
+    fillFromModelFile(pendingBytes);
   });
 };
+
+/* Fill in what the file already states, rather than asking for it again.
+   These are not preferences - imgsz must match the graph's fixed input or the
+   model will not run at all, and the class order must match or every label is
+   wrong. Anything the file does not carry is left alone for the user. */
+function fillFromModelFile(bytes){
+  const meta = onnxMeta(bytes);
+  const order = P("mdOrder");
+
+  if(meta.task === "classify" || meta.task === "detect") P("mdType").value = meta.task;
+
+  // "imgsz" is written as [h,w] - one number is enough, the crop is letterboxed
+  if(meta.imgsz){
+    let n = null;
+    try{ const a = JSON.parse(meta.imgsz); n = Array.isArray(a) ? +a[0] : +a; }
+    catch(err){ n = +meta.imgsz || null; }
+    if(n > 0) P("mdSize").value = n;
+  }
+
+  const names = onnxClasses(meta);
+  order.textContent = "";
+  if(names && names.length){
+    P("mdClasses").value = names.join("\n");
+    const head = document.createElement("b");
+    head.textContent = t("namesFromFile") + " ";
+    order.appendChild(head);
+    // index first, every time: position is what the matching is done on
+    names.forEach((n, i) => {
+      const s = document.createElement("span");
+      s.style.cssText = "margin-right:14px;white-space:nowrap";
+      const k = document.createElement("span");
+      k.style.cssText = "color:#F30006;font-weight:700";
+      k.textContent = i + " ";
+      s.appendChild(k);
+      s.appendChild(document.createTextNode(n + " "));
+      order.appendChild(s);
+    });
+  } else {
+    order.textContent = t("namesNotInFile");
+  }
+  order.style.display = "";
+}
 P("mdSave").onclick = async () => {
   if(!pendingBytes) return toast(t("pickOnnx"));
   const names = P("mdClasses").value.split(/[\n,]/).map(x => x.trim()).filter(Boolean);
