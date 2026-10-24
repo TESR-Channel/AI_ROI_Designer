@@ -58,7 +58,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.6.1"
+STUDIO_VERSION = "1.7.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1664,6 +1664,8 @@ def task_gauge(crop, roi):
 # Tasks that measure or count across the whole frame rather than inside a crop.
 # A counting line only means anything in the coordinates it was drawn on, so
 # these receive the frame itself plus a context carrying the camera scale.
+MODEL_TASKS = ("yolo_detect", "yolo_classify")
+
 FRAME_TASKS = ("level_line", "measure_line", "line_count", "zone_count")
 
 
@@ -2027,6 +2029,37 @@ def _panel(img, x, y, w, h, alpha=0.78):
     roi[:] = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, INK, np.uint8), alpha, 0)
 
 
+DEFAULT_HOLD = 5          # frames; only for regions that run a model
+
+
+def reading_key(value):
+    """What counts as "the same reading", ignoring what jitters every frame.
+
+    A detect region publishing "items" hands back the class, the confidence and
+    the box. The confidence moves every frame and the box moves a pixel or two,
+    so comparing whole values means no two frames are ever equal - which
+    silently defeated stable_frames altogether. At stable_frames 2 nothing was
+    ever published at all; at 1 everything was, thirty times a second.
+
+    What a person means by "it has not changed" is the class, or the number, or
+    the text. That is what this compares.
+    """
+    if isinstance(value, (list, tuple)):
+        names = []
+        for v in value:
+            n = (v.get("class") or v.get("name")) if isinstance(v, dict) else v
+            names.append(str(n))
+        return tuple(sorted(names))
+    if isinstance(value, dict):
+        return tuple(sorted((k, str(v)) for k, v in value.items()))
+    return value
+
+
+def is_blank(value):
+    """A region that read nothing, in any of the shapes that can mean that."""
+    return value is None or value == "" or value == [] or value == ()
+
+
 def value_text(roi, val):
     """What a reading should look like on a screen, which is not what it is.
 
@@ -2291,7 +2324,8 @@ def run(cfg, args):
                       kind=args.camera)
     bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
 
-    stable = {r["id"]: {"cand": None, "count": 0, "last": None} for r in rois}
+    stable = {r["id"]: {"cand": None, "count": 0, "last": None,
+                        "value": None, "conf": 0.0} for r in rois}
     gstable = {n: None for n, _ in groups}
     results = {}
     show_panel = not args.no_panel
@@ -2349,18 +2383,34 @@ def run(cfg, args):
                 except Exception as exc:
                     log("ROI '%s' failed: %s" % (roi["name"], exc), "WARN")
                     continue
-                results[roi["id"]] = {"value": value, "conf": conf}
                 if isinstance(dbg, np.ndarray):
                     debugs.append((roi["name"], dbg))
 
                 st = stable[roi["id"]]
                 need = max(1, int(roi.get("stable_frames", 1)))
-                if value == st["cand"]:
+                params = roi.get("params") or {}
+                hold = params.get("hold")
+                if hold is None:
+                    hold = DEFAULT_HOLD if roi["task"] in MODEL_TASKS else 0
+                hold = max(0, int(hold))
+
+                rkey = reading_key(value)
+                if rkey == st["cand"]:
                     st["count"] += 1
                 else:
-                    st["cand"], st["count"] = value, 1
-                if st["count"] == need and value != st["last"]:
-                    st["last"] = value
+                    st["cand"], st["count"] = rkey, 1
+
+                # Losing a detection is weaker evidence than gaining one. A
+                # detector that missed a single frame has not told you the slot
+                # is empty, so a drop to nothing has to argue for longer than a
+                # change from one class to another. This is the whole of the
+                # flicker: the model is right most frames and silent on some.
+                need_now = need
+                if hold and is_blank(value) and not is_blank(st["value"]):
+                    need_now = max(need, hold)
+
+                if st["count"] >= need_now and rkey != st["last"]:
+                    st["last"], st["value"], st["conf"] = rkey, value, conf
                     key = roi.get("output_key") or roi["name"]
                     bus.publish(roi, key, value, conf, changed=True,
                                 echo=(console == "change"))
@@ -2370,6 +2420,13 @@ def run(cfg, args):
                                            "%s_%s_%s.jpg" % (cam.get("id"), roi["name"],
                                                              datetime.now().strftime("%Y%m%d_%H%M%S")))
                         cv2.imwrite(fn_, frame)
+
+                # The window and the summary console show the SETTLED reading,
+                # so what you watch is what the rest of the system was told.
+                # A live confidence is still shown while the class holds.
+                results[roi["id"]] = {
+                    "value": st["value"],
+                    "conf": conf if rkey == st["last"] else st["conf"]}
 
             # shift / daily rollover: publish the closing numbers before zeroing
             for c in ctx["counters"].values():
