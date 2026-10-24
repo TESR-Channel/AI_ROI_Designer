@@ -56,7 +56,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.1.0"
+STUDIO_VERSION = "1.2.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -107,6 +107,50 @@ def log(msg, level="INFO"):
 
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def names_of(value):
+    """Whatever a region published, as a plain list of class names.
+
+    A detect region set to publish class names gives a LIST: [] for an empty
+    region, one name for a filled one, occasionally two when the crop catches
+    the edge of its neighbour. A classify region gives a single string. Both
+    are handled, so changing a region's task later does not quietly change the
+    meaning of every verdict built on it.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        seq = value
+    elif isinstance(value, dict):
+        return []                      # a counter's {'in':.., 'out':..} is not a name
+    else:
+        seq = [value]
+    return [v for v in seq if isinstance(v, str) and v not in ("", "empty")]
+
+
+def verdict_for(roi, value):
+    """ok / wrong / empty for one reading, or None when there is nothing to judge.
+
+    This never changes what the region detected or published. It is only an
+    opinion about what SHOULD have been there, taken from params.expect, which
+    the Studio sets from a dropdown of the model's own class list.
+
+    Deliberately NOT a filter. A region that discarded the wrong part would
+    report an empty slot instead of a fault, and "empty" is the one answer an
+    inspection station must never give while the wrong thing sits in front of
+    the camera.
+    """
+    expect = (roi.get("params") or {}).get("expect")
+    if not expect:
+        return None
+    # a count has no names in it, so it cannot answer "is this the right part"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return None
+    found = names_of(value)
+    if not found:
+        return "empty"
+    return "ok" if expect in found else "wrong"
 
 
 _GUI = None
@@ -192,6 +236,19 @@ def load_config(path):
         rt[key] = merged
     cfg["runtime"] = rt
     cfg.setdefault("cameras", [])
+
+    # An expected class on a region that only publishes a NUMBER can never be
+    # judged - a count carries no names. Silence here would look like a station
+    # that simply never finds a fault, so say it once at startup instead.
+    for cam in cfg["cameras"]:
+        for roi in cam.get("rois") or []:
+            p = roi.get("params") or {}
+            if p.get("expect") and roi.get("task") == "yolo_detect" \
+                    and p.get("output", "count") == "count":
+                log("region '%s' expects '%s' but publishes a count, which has "
+                    "no class names in it - no verdict can be reached. Set "
+                    "Value to output = Class names for this region."
+                    % (roi.get("name"), p["expect"]), "WARN")
     return cfg
 
 
@@ -1547,9 +1604,16 @@ class OutputBus:
         ts = now_iso()
         rec = {"time": ts, "project": self.project, "camera": self.cam_id,
                "roi": roi["name"], "key": key, "value": value, "conf": round(conf, 3)}
+        # An expected class adds an opinion; it never alters what was read, so
+        # "value" above is the same whether or not anybody set an expectation.
+        verdict = verdict_for(roi, value)
+        if verdict:
+            rec["expect"] = (roi.get("params") or {}).get("expect")
+            rec["verdict"] = verdict
         if echo and self.rt.get("print_console"):
-            print("%s  %-14s %-10s = %s  (conf %.2f)"
-                  % (ts, roi["name"], key, value, conf), flush=True)
+            print("%s  %-14s %-10s = %s  (conf %.2f)%s"
+                  % (ts, roi["name"], key, value, conf,
+                     ("  [%s]" % verdict) if verdict else ""), flush=True)
         if self.jsonl:
             self.jsonl.write(json.dumps(rec, ensure_ascii=False) + "\n")
             self.jsonl.flush()
