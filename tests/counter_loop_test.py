@@ -92,7 +92,7 @@ def config(reset_mode):
 
 
 class Args:
-    camera = source = image = calibrate = None
+    camera = camera_id = source = image = calibrate = None
     once = test = headless = list = selftest = version = False
     auto_group = no_panel = reset_counters = False
     console = "none"

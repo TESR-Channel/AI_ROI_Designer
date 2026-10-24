@@ -538,7 +538,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.3"
+STUDIO_VERSION = "1.7.4"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -2543,6 +2543,37 @@ def _fit_text(txt, max_w, scale):
 DEFAULT_HOLD = 5          # frames; only for regions that run a model
 
 
+def runs_now(roi, frame_i):
+    """Does this region run on frame number frame_i (counted from 1)?
+
+    every_n_frames N means frames 1, 1+N, 1+2N ... - the FIRST frame always
+    runs. Counting "frame_i % N == 0" from 1 skipped it, which a live camera
+    never notices but --once on a single picture does: the one frame it had
+    was the one frame the region sat out.
+    """
+    return (frame_i - 1) % max(1, int(roi.get("every_n_frames", 1))) == 0
+
+
+def once_frame_budget(rois):
+    """How many frames --once may read before it gives up waiting to settle.
+
+    A region settles after stable_frames readings that agree, and it only reads
+    every every_n_frames frames, so the slowest region needs about the product
+    of the two (a model region's hold counts as well). Twice that plus a margin
+    leaves room for a camera's first dark frames, and still ends in a moment on
+    a still picture, which is read again and again until it settles.
+    """
+    worst = 1
+    for r in rois:
+        n = max(1, int(r.get("every_n_frames", 1)))
+        need = max(1, int(r.get("stable_frames", 1)))
+        if r.get("task") in MODEL_TASKS:
+            hold = (r.get("params") or {}).get("hold")
+            need = max(need, DEFAULT_HOLD if hold is None else int(hold))
+        worst = max(worst, need * n)
+    return 2 * worst + 10
+
+
 def reading_key(value):
     """What counts as "the same reading", ignoring what jitters every frame.
 
@@ -2872,6 +2903,12 @@ def run(cfg, args):
                         "value": None, "conf": 0.0} for r in rois}
     gstable = {n: None for n, _ in groups}
     results = {}
+    # --once used to print after the very first frame, which since the
+    # stability gate (v1.7.0) meant null for every region with stable_frames
+    # above 1. It now keeps reading - the same picture again for --image -
+    # until every region has settled, and only then prints.
+    settled = {r["id"]: False for r in rois if TASKS.get(r.get("task"))}
+    once_budget = once_frame_budget(rois) if args.once else 0
     show_panel = not args.no_panel
     period = 1.0 / max(1.0, float(rt.get("loop_fps", 10)))
     frame_i, fps, t_prev = 0, 0.0, time.time()
@@ -2913,7 +2950,7 @@ def run(cfg, args):
 
             debugs = []
             for roi in rois:
-                if frame_i % max(1, int(roi.get("every_n_frames", 1))) != 0:
+                if not runs_now(roi, frame_i):
                     continue
                 fn = TASKS.get(roi["task"])
                 if fn is None:
@@ -2971,6 +3008,10 @@ def run(cfg, args):
                 results[roi["id"]] = {
                     "value": st["value"],
                     "conf": conf if rkey == st["last"] else st["conf"]}
+                # settled: enough agreeing readings, and that is what was told
+                # to the rest of the system (a region that reads nothing settles
+                # on null, which is an answer too)
+                settled[roi["id"]] = st["count"] >= need_now and rkey == st["last"]
 
             # shift / daily rollover: publish the closing numbers before zeroing
             for c in ctx["counters"].values():
@@ -3024,6 +3065,18 @@ def run(cfg, args):
                     log("saved %s" % p)
 
             if args.once:
+                done = all(settled.values())
+                if not done and frame_i < once_budget:
+                    if src.kind != "image":     # the same picture needs no wait
+                        sleep = period - (time.time() - t0)
+                        if sleep > 0:
+                            time.sleep(sleep)
+                    continue
+                if not done:
+                    log("--once: %s did not settle within %d frames - printing "
+                        "the last settled value (null if none)"
+                        % (", ".join(r["name"] for r in rois if not settled.get(r["id"], True)),
+                           frame_i), "WARN")
                 summary = {r["name"]: results.get(r["id"], {}).get("value") for r in rois}
                 for name, members in groups:
                     summary[name] = group_value(members, results)[0]
@@ -3171,7 +3224,8 @@ def main():
     ap.add_argument("--source", help="where it comes from: an index for usb/csi (0, 1, 2), "
                                      "a URL for ip, a path for file")
     ap.add_argument("--image", help="run on a single image file")
-    ap.add_argument("--once", action="store_true", help="process one frame, print JSON, exit")
+    ap.add_argument("--once", action="store_true",
+                    help="read until every ROI has settled (stable_frames), print one JSON, exit")
     ap.add_argument("--test", action="store_true", help="show preview window + ROI debug panel")
     ap.add_argument("--headless", action="store_true", help="no window (service / SSH / Jetson)")
     ap.add_argument("--console", choices=["summary", "change", "none"],
@@ -3986,7 +4040,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.7.3";
+const STUDIO_VERSION = "1.7.4";
 
 const I18N = {
 th: {
@@ -8139,6 +8193,22 @@ dbAll().then(list => { if(list.length){ list.forEach(m => models.push(m)); rende
 
 
 /* ------------------------------ export ------------------------------ */
+/* A line or a polygon is its points; the box around it is bookkeeping.
+   A region drawn here gets that box from addRoi(), but one written by hand,
+   or by an older export, arrives with points only - and every piece of the
+   page that reads r.rect (the properties panel, Duplicate, Export) used to
+   fall over on it with "reading 'x'". So the box is derived from the points
+   when it is missing, padded so a perfectly flat line still has a size. */
+function rectFromPoints(points){
+  const pts = (points || []).filter(q => q && isFinite(+q[0]) && isFinite(+q[1]));
+  if(!pts.length) return null;
+  const xs = pts.map(q => +q[0]), ys = pts.map(q => +q[1]);
+  const MIN = 0.01, clamp = v => Math.min(1, Math.max(0, v));
+  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if(x1 - x0 < MIN){ const c = (x0 + x1) / 2; x0 = clamp(c - MIN/2); x1 = clamp(c + MIN/2); }
+  if(y1 - y0 < MIN){ const c = (y0 + y1) / 2; y0 = clamp(c - MIN/2); y1 = clamp(c + MIN/2); }
+  return {x:+x0.toFixed(4), y:+y0.toFixed(4), w:+(x1 - x0).toFixed(4), h:+(y1 - y0).toFixed(4), angle:0};
+}
 function buildConfig(includeRef){
   return {
     schema: "tesr.roi.v1",
@@ -8155,11 +8225,13 @@ function buildConfig(includeRef){
       detector: c.detector ? (() => { const d = Object.assign({}, c.detector); delete d.id; return d; })() : undefined,
       reference_image: includeRef ? c.bg : null,
       rois: c.rois.map(r => {
+        const b = r.rect || rectFromPoints(r.points);
         const o = {id:r.id, name:r.name, enabled:r.enabled !== false, task:r.task,
                    output_key:r.output_key || r.name, stable_frames:r.stable_frames || 1,
                    every_n_frames:r.every_n_frames || 1, upscale_to:r.upscale_to || 0,
-                   rect:{x:+r.rect.x.toFixed(5), y:+r.rect.y.toFixed(5),
-                         w:+r.rect.w.toFixed(5), h:+r.rect.h.toFixed(5), angle:+(r.rect.angle||0)},
+                   rect:b ? {x:+(+b.x).toFixed(5), y:+(+b.y).toFixed(5),
+                             w:+(+b.w).toFixed(5), h:+(+b.h).toFixed(5), angle:+(b.angle||0)}
+                          : undefined,
                    params:r.params};
         if(r.group) o.group = r.group;
         if(r.shape && r.shape !== "rect"){
@@ -8507,6 +8579,16 @@ function needsLineEngine(){
 }
 function quickstart(cfg, zipName, mdls, bytes){
   const cams = state.cameras.map(c => "  " + c.id + "  (" + c.rois.length + " ROI)  source=" + c.source).join("\n");
+  // --camera says what KIND of camera (usb|csi|ip|file); which camera of the
+  // config is --camera-id. The hint used to say "--camera cam2", which the
+  // runner rejects. Name a camera that is really in this file when there is one.
+  const camId2 = (state.cameras[1] && state.cameras[1].id) || "cam2";
+  const pad = x => x + " ".repeat(Math.max(2, 32 - x.length));
+  // only the outputs this config will actually write
+  const rt = state.runtime || {};
+  const outs = [rt.csv_log, rt.jsonl_log].filter(Boolean)
+    .concat(rt.mqtt && rt.mqtt.enabled ? ["MQTT " + (rt.mqtt.topic_prefix || "tesr/vision")] : [])
+    .concat(rt.webhook && rt.webhook.enabled ? ["Webhook"] : []);
   const mb = (bytes / 1048576).toFixed(1);
   const modelLines = mdls.map(m => "  " + m.deploy +
     "   " + m.type + ", imgsz " + m.size +
@@ -8549,14 +8631,15 @@ cams,
 "   python tesr_vision_runner.py --config " + cfg + " --headless",
 "",
 "เปลี่ยนกล้องชั่วคราวโดยไม่แก้ไฟล์",
-"   --source 0            USB camera ตัวแรก",
-"   --source rtsp://user:pass@192.168.1.50:554/stream1",
-"   --camera cam2         เลือกกล้องอื่นในไฟล์เดียวกัน",
+"   --camera usb --source 0         USB camera ตัวแรก (ตัวถัดไป 1, 2 ...)",
+"   --camera csi                    กล้องสายแพ (Raspberry Pi / Jetson)",
+"   --camera ip --source rtsp://user:pass@192.168.1.50:554/stream1",
+"   " + pad("--camera-id " + camId2) + "เลือกกล้องอื่นในไฟล์เดียวกัน (ตาม id หรือชื่อ ดูรายการด้านบน)",
 "",
 "ถ้ามี ROI ที่ใช้โมเดล อย่าลืมคัดลอกไฟล์ .onnx ไปวางไว้โฟลเดอร์เดียวกันด้วย",
 "",
 "ผลลัพธ์ที่ได้",
-"   พิมพ์ค่าออกหน้าจอ · logs/results.csv · logs/results.jsonl · MQTT/Webhook ถ้าเปิดไว้",
+"   " + ["พิมพ์ค่าออกหน้าจอ"].concat(outs).join(" · "),
 "",
 "ข้อควรระวังหน้างาน",
 "   วางกรอบให้กว้างกว่าตัวเลขเล็กน้อย เผื่อกล้องขยับ",
@@ -8603,14 +8686,15 @@ cams,
 "   python tesr_vision_runner.py --config " + cfg + " --headless",
 "",
 "Switch camera without editing the file",
-"   --source 0            first USB camera",
-"   --source rtsp://user:pass@192.168.1.50:554/stream1",
-"   --camera cam2         another camera from the same config",
+"   --camera usb --source 0         first USB camera (then 1, 2 ...)",
+"   --camera csi                    ribbon camera (Raspberry Pi / Jetson)",
+"   --camera ip --source rtsp://user:pass@192.168.1.50:554/stream1",
+"   " + pad("--camera-id " + camId2) + "another camera from the same config (by id or name, listed above)",
 "",
 "If any ROI uses a model, copy the .onnx file into the same folder as well.",
 "",
 "What you get",
-"   values printed to the console · logs/results.csv · logs/results.jsonl · MQTT/Webhook when enabled",
+"   " + ["values printed to the console"].concat(outs).join(" · "),
 "",
 "Things that bite on the shop floor",
 "   Leave a little margin around the digits so a small camera shift does not break the read.",
@@ -8649,8 +8733,14 @@ function loadConfig(cfg){
     id:c.id, name:c.name || c.id, source:String(c.source != null ? c.source : "0"),
     width:c.width || 1280, height:c.height || 720, rotate:c.rotate || 0,
     bg:c.reference_image || null, scale:c.scale || null, detector:c.detector || null,
-    rois:(c.rois || []).map(r => Object.assign({enabled:true, stable_frames:1, every_n_frames:1,
-      upscale_to:0, params:{}, shape:(r.points ? (r.points.length > 2 ? "polygon" : "line") : "rect")}, r))
+    rois:(c.rois || []).map(r => {
+      const o = Object.assign({enabled:true, stable_frames:1, every_n_frames:1,
+        upscale_to:0, params:{}, shape:(r.points ? (r.points.length > 2 ? "polygon" : "line") : "rect")}, r);
+      // a line or polygon written with points only still needs the box the
+      // rest of the page works from; one with neither gets a default to drag
+      if(!o.rect) o.rect = rectFromPoints(o.points) || {x:0.3, y:0.4, w:0.4, h:0.2, angle:0};
+      return o;
+    })
   }));
   if(!state.cameras.length) state.cameras = [newCamera(1)];
   state.ci = 0; state.sel = null;
