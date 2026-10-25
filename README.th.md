@@ -660,7 +660,24 @@ Task `plate_ocr` คือ OCR ที่บังคับชุดตัวอ�
 
 ```bash
 sudo apt install tesseract-ocr-tha      # Debian / Raspberry Pi OS
+brew install tesseract tesseract-lang   # macOS
 ```
+
+**Windows:** pip ลงให้แค่ `pytesseract` ซึ่งเป็นแค่ตัวเรียกใช้ ตัวโปรแกรม Tesseract ต้องติดตั้งแยก:
+`winget install -e --id UB-Mannheim.TesseractOCR` หรือตัวติดตั้งจาก
+https://github.com/UB-Mannheim/tesseract/wiki (ติ๊ก Thai ใน *Additional language data*)
+ตั้งแต่ v1.8.3 runner หา Tesseract ใน Program Files ได้เอง ไม่ต้องแก้ PATH
+
+**ขาดภาษา ทุกระบบ ไม่ต้องใช้สิทธิ์ admin:**
+
+```bash
+python tesr_vision_runner.py --get-lang tha
+```
+
+จะดาวน์โหลด `tha.traineddata` มาไว้ในโฟลเดอร์ `tessdata` ข้าง ๆ แล้ว runner ใช้จากตรงนั้นเอง
+เป็นไฟล์ tessdata_fast ตัวเดียวกับที่ `tesseract-ocr-tha` ติดตั้ง (ไบต์ตรงกัน) ผลอ่านจึงเหมือนบน Pi
+ตอนเริ่ม runner จะเช็กโปรแกรมและทุกภาษาที่ config ใช้แค่ครั้งเดียว แล้วบอกวิธีแก้ ไม่พิมพ์คำเตือนเดิมซ้ำทุกเฟรมอีก
+
 ```json
 "params": {"engine": "tesseract", "lang": "tha",
            "whitelist": "0123456789กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ"}
