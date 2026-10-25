@@ -678,7 +678,25 @@ as you have not edited that list yourself. On the device Tesseract needs the lan
 
 ```bash
 sudo apt install tesseract-ocr-tha      # Debian / Raspberry Pi OS
+brew install tesseract tesseract-lang   # macOS
 ```
+
+**Windows:** pip installs only `pytesseract`, a wrapper - the Tesseract program itself is a
+normal Windows install: `winget install -e --id UB-Mannheim.TesseractOCR`, or the installer from
+https://github.com/UB-Mannheim/tesseract/wiki (tick Thai under *Additional language data*). Since
+v1.8.3 the runner finds it in Program Files by itself, so PATH does not need editing.
+
+**Missing a language, any OS, no admin rights:**
+
+```bash
+python tesr_vision_runner.py --get-lang tha
+```
+
+downloads `tha.traineddata` into a `tessdata` folder beside you, and the runner uses it from
+there. It is the tessdata_fast file - byte-for-byte what `tesseract-ocr-tha` installs - so the
+reading matches the Pi. At startup the runner now checks the engine and every language the
+config asks for once, and says what to do; it no longer prints the same warning every frame.
+
 ```json
 "params": {"engine": "tesseract", "lang": "tha",
            "whitelist": "0123456789กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ"}

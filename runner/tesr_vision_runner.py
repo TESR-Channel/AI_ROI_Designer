@@ -59,7 +59,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.2"
+STUDIO_VERSION = "1.8.3"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -731,6 +731,136 @@ def ocr_langs(lang, engine):
     return "+".join(_TESS_LANG.get(x, x) for x in parts) or "eng"
 
 
+# Where Tesseract's own installers put it. pytesseract only looks on PATH, and
+# the Windows installer does not touch PATH, so a fresh install ends in
+# "tesseract is not installed" while it sits right there in Program Files.
+_TESS_PLACES = [
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Tesseract-OCR", "tesseract.exe"),
+    os.path.join(os.environ.get("LOCALAPPDATA", ""), "Tesseract-OCR", "tesseract.exe"),
+    "/opt/homebrew/bin/tesseract",
+    "/usr/local/bin/tesseract",
+    "/usr/bin/tesseract",
+]
+
+# The exact data the course was measured with: tessdata_fast is what Debian,
+# Ubuntu and Raspberry Pi OS ship as tesseract-ocr-<lang> (same file, same md5).
+TESSDATA_URL = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/%s.traineddata"
+
+_TESS = {"ready": None, "dirs": [], "have": set()}
+_WARNED = set()
+
+
+def _tess_fix_text():
+    if platform.system() == "Windows":
+        return ("install Tesseract from https://github.com/UB-Mannheim/tesseract/wiki "
+                "(tick Thai under 'Additional language data' if you read Thai), "
+                "or: winget install -e --id UB-Mannheim.TesseractOCR - "
+                "this runner finds it in Program Files by itself, no PATH needed")
+    if platform.system() == "Darwin":
+        return "brew install tesseract tesseract-lang"
+    return "sudo apt install tesseract-ocr tesseract-ocr-tha"
+
+
+def _local_tessdata(config_path=None):
+    """./tessdata next to the config, the working folder or this script."""
+    bases = [os.getcwd(), os.path.dirname(os.path.abspath(__file__))]
+    if config_path:
+        bases.insert(0, os.path.dirname(os.path.abspath(config_path)))
+    out = []
+    for b in bases:
+        d = os.path.join(b, "tessdata")
+        if os.path.isdir(d) and d not in out:
+            out.append(d)
+    return out
+
+
+def tesseract_setup(rois, config_path=None):
+    """Find the engine and the language data ONCE, before the first frame.
+
+    Without this the only signal was the same WARN line printed for every ROI
+    on every frame, which scrolls the answer off the screen.
+    """
+    want = set()
+    for r in rois:
+        p = r.get("params") or {}
+        if r.get("task") in ("ocr_text", "plate_ocr") and p.get("engine", "tesseract") == "tesseract":
+            want.update(ocr_langs(p.get("lang", "eng"), "tesseract").split("+"))
+    if not want:
+        return True
+    try:
+        import pytesseract
+    except ImportError:
+        log("pytesseract is not installed -> pip install pytesseract", "WARN")
+        _TESS["ready"] = False
+        return False
+    import shutil
+    if not shutil.which(pytesseract.pytesseract.tesseract_cmd or "tesseract"):
+        found = next((c for c in _TESS_PLACES if c and os.path.isfile(c)), None)
+        if found:
+            pytesseract.pytesseract.tesseract_cmd = found
+        else:
+            log("Tesseract (the OCR program) is not on this machine, so no text or "
+                "plate can be read.\n        Fix: " + _tess_fix_text(), "WARN")
+            _TESS["ready"] = False
+            return False
+    _TESS["dirs"] = _local_tessdata(config_path)
+    have = set()
+    try:
+        have.update(pytesseract.get_languages(config=""))
+    except Exception:
+        pass
+    for d in _TESS["dirs"]:
+        have.update(f[:-len(".traineddata")] for f in os.listdir(d) if f.endswith(".traineddata"))
+    _TESS["have"] = have
+    try:
+        ver = pytesseract.get_tesseract_version()
+    except Exception:
+        ver = "?"
+    log("ocr      : tesseract %s (%s)%s" % (
+        ver, pytesseract.pytesseract.tesseract_cmd,
+        "  + local data %s" % ", ".join(_TESS["dirs"]) if _TESS["dirs"] else ""))
+    missing = sorted(want - have)
+    if missing:
+        log("Tesseract has no language data for %s, so those ROIs stay empty.\n"
+            "        Fix (any computer, no admin): python tesr_vision_runner.py --get-lang %s\n"
+            "        That downloads it into a tessdata folder here."
+            % ("+".join(missing), "+".join(missing)), "WARN")
+    _TESS["ready"] = True
+    return True
+
+
+def _tess_dir_for(langs):
+    """A local tessdata folder that holds every language asked for, or None."""
+    for d in _TESS["dirs"]:
+        if all(os.path.isfile(os.path.join(d, l + ".traineddata")) for l in langs.split("+")):
+            return d
+    return None
+
+
+def get_lang(codes, dest=None):
+    """--get-lang tha : download the language data the course was measured with."""
+    import urllib.request
+    dest = dest or os.path.join(os.getcwd(), "tessdata")
+    os.makedirs(dest, exist_ok=True)
+    ok = True
+    for code in [c for c in re.split(r"[+,\s]+", codes) if c]:
+        code = _TESS_LANG.get(code.lower(), code.lower())
+        path = os.path.join(dest, code + ".traineddata")
+        url = TESSDATA_URL % code
+        try:
+            print("downloading %s -> %s" % (url, path), flush=True)
+            urllib.request.urlretrieve(url, path)
+            print("  %.1f MB" % (os.path.getsize(path) / 1e6), flush=True)
+        except Exception as exc:
+            ok = False
+            print("[FATAL] could not download %s: %s" % (code, exc), flush=True)
+    if ok:
+        print("Done. Run your command again from this folder.", flush=True)
+    return 0 if ok else 1
+
+
 def task_ocr(crop, roi):
     p = roi.get("params") or {}
     engine = p.get("engine", "tesseract")
@@ -742,16 +872,23 @@ def task_ocr(crop, roi):
     dbg = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
     if engine == "tesseract":
+        if _TESS["ready"] is False:
+            return "", 0.0, dbg             # already explained once at startup
         try:
             import pytesseract
         except ImportError:
             return "", 0.0, dbg
+        langs = ocr_langs(p.get("lang", "eng"), "tesseract")
+        if _TESS["have"] and not set(langs.split("+")) <= _TESS["have"]:
+            return "", 0.0, dbg             # language data missing - said once at startup
         cfg = "--psm %s" % p.get("psm", 7)
+        tdir = _tess_dir_for(langs)
+        if tdir:
+            cfg = '--tessdata-dir "%s" ' % tdir + cfg
         wl = p.get("whitelist", "")
         if wl:
             cfg += " -c tessedit_char_whitelist=%s" % wl
-        txt = pytesseract.image_to_string(gray, lang=ocr_langs(p.get("lang", "eng"), "tesseract"),
-                                          config=cfg)
+        txt = pytesseract.image_to_string(gray, lang=langs, config=cfg)
         return txt.strip(), 0.5, dbg
 
     if engine == "easyocr":
@@ -2394,6 +2531,7 @@ def run(cfg, args):
         % (platform.system(), platform.machine(), platform.python_version(), cv2.__version__))
     log("camera   : %s (%s)  source=%r" % (cam.get("name"), cam.get("id"), source))
     log("rois     : %s" % ", ".join("%s[%s]" % (r["name"], r["task"]) for r in rois))
+    tesseract_setup(rois, getattr(args, "config", None))
     if groups:
         log("groups   : %s" % ", ".join(
             "%s(%s)" % (n, "+".join(r["name"] for r in ms)) for n, ms in groups))
@@ -2506,7 +2644,10 @@ def run(cfg, args):
                         crop = crop_roi(frame, roi["rect"], upscale_to=roi.get("upscale_to", 0))
                         value, conf, dbg = fn(crop, roi)
                 except Exception as exc:
-                    log("ROI '%s' failed: %s" % (roi["name"], exc), "WARN")
+                    key = (roi["name"], str(exc))
+                    if key not in _WARNED:
+                        _WARNED.add(key)
+                        log("ROI '%s' failed: %s  (shown once)" % (roi["name"], exc), "WARN")
                     continue
                 if isinstance(dbg, np.ndarray):
                     debugs.append((roi["name"], dbg))
@@ -2786,6 +2927,8 @@ def main():
     ap.add_argument("--calibrate", help="tune params of one ROI with live sliders")
     ap.add_argument("--list", action="store_true", help="list cameras and ROIs, then exit")
     ap.add_argument("--selftest", action="store_true", help="verify the digit reader offline")
+    ap.add_argument("--get-lang", dest="get_lang", metavar="LANG",
+                    help="download Tesseract language data into ./tessdata, e.g. --get-lang tha")
     ap.add_argument("--version", action="store_true")
     args = ap.parse_args()
 
@@ -2798,6 +2941,8 @@ def main():
         return 0
     if args.selftest:
         return selftest()
+    if args.get_lang:
+        return get_lang(args.get_lang)
 
     cfg = load_config(args.config)
 
