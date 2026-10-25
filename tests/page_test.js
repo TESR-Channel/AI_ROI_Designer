@@ -181,6 +181,54 @@ whenReady(() => {
   check("quickstart does not tell you to copy the .onnx",
         stale.test(G("quickstart")("p_config.json", "p_project.zip", [mdl], 1024)), false);
 
+  console.log("\n--- classes are clicked, not typed (v1.7.6) ---");
+  const cp = G("classPicker");
+  let got = null;
+  const names = ["Red_Apple", "Green_Apple", "Orange", "Lemon"];
+  const box = cp(names, [], v => { got = v; }, "none");
+  const chips = () => [...box.querySelectorAll(".chip.pick")];
+  check("one chip per class plus All", chips().length, 5);
+  check("no text box to type a class into", box.querySelectorAll("input").length, 0);
+  chips().find(b => /Orange/.test(b.textContent)).click();
+  check("clicking a class keeps only that class", got, ["Orange"]);
+  chips().find(b => /Red_Apple/.test(b.textContent)).click();
+  check("picks come back in the model's order", got, ["Red_Apple", "Orange"]);
+  chips().find(b => /All classes/.test(b.textContent)).click();
+  check("All classes clears the filter (= every class)", got, []);
+  names.forEach(n => chips().find(b => b.textContent.endsWith(" " + n)).click());
+  check("ticking every class is the same as All", got, []);
+  const stale2 = cp(names, ["orenge"], v => { got = v; }, "none");
+  check("a name the model lacks is shown as a warning chip",
+        stale2.querySelectorAll(".chip.warn").length, 1);
+  stale2.querySelector(".chip.warn").click();
+  check("and one click removes it", got, []);
+  check("no model picked says where to pick one",
+        cp([], [], () => {}, "pick-a-model").textContent.includes("pick-a-model"), true);
+
+  console.log("\n--- the browser counts a line the way the runner does ---");
+  // a box moving left to right through a vertical gate drawn top to bottom:
+  // the gold arrow of such a gate points left-to-right, so this is one "in"
+  const gateRoi = {id: "g", task: "line_count", shape: "line", points: [[0.5, 0], [0.5, 1]],
+                   params: {label_in: "in", label_out: "out", classes: []}};
+  G("resetTally")();
+  for (let x = 101; x <= 500; x += 37) {
+    G("trackUpdate")([{box: [x - 20, 80, x + 20, 120], name: "Orange", conf: 0.9}], 600, 200);
+    G("countLineJS")(gateRoi, 600, 200);
+  }
+  check("left to right across the gate is one in", G("countLineJS")(gateRoi, 600, 200), {i: 1, o: 0});
+  gateRoi.params.invert = true; G("resetTally")();
+  for (let x = 101; x <= 500; x += 37) {
+    G("trackUpdate")([{box: [x - 20, 80, x + 20, 120], name: "Orange", conf: 0.9}], 600, 200);
+    G("countLineJS")(gateRoi, 600, 200);
+  }
+  check("invert turns it into an out", G("countLineJS")(gateRoi, 600, 200), {i: 0, o: 1});
+  gateRoi.params.invert = false; gateRoi.params.classes = ["Lemon"]; G("resetTally")();
+  for (let x = 101; x <= 500; x += 37) {
+    G("trackUpdate")([{box: [x - 20, 80, x + 20, 120], name: "Orange", conf: 0.9}], 600, 200);
+    G("countLineJS")(gateRoi, 600, 200);
+  }
+  check("a class left out is not counted", G("countLineJS")(gateRoi, 600, 200), {i: 0, o: 0});
+
   console.log("\n--- the exported Python matches runner/ byte for byte ---");
   for (const [id, file] of [["runnerSrc", "runner/tesr_vision_runner.py"],
                             ["lineSrc", "runner/tesr_line_engine.py"]]) {

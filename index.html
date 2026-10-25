@@ -150,6 +150,11 @@
   .chip{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border:1px solid var(--line);
         border-radius:99px;font-family:var(--mono);font-size:10px;color:var(--muted)}
   .chip.on{border-color:var(--tesr-gold-deep);color:var(--tesr-gold)}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;margin:2px 0 4px}
+  .chip.pick{background:transparent;cursor:pointer;font-size:11px;padding:3px 9px}
+  .chip.pick:hover{border-color:var(--tesr-gold-deep)}
+  .chip.pick.on{background:rgba(230,204,129,.10)}
+  .chip.pick.warn{border-color:var(--tesr-red);color:#ff8a8d}
   .busy{display:inline-block;width:10px;height:10px;border:2px solid var(--line-2);
         border-top-color:var(--tesr-gold);border-radius:50%;animation:spin .7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -538,7 +543,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.7.5"
+STUDIO_VERSION = "1.7.6"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -4044,7 +4049,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.7.5";
+const STUDIO_VERSION = "1.7.6";
 
 const I18N = {
 th: {
@@ -4177,7 +4182,17 @@ th: {
   expectUnknown:"(ไม่มีในโมเดลนี้)",
   expectHint:"ไม่กรองอะไรทั้งสิ้น — ยังเห็นทุกคลาสเหมือนเดิม แค่เพิ่มคำตัดสิน ok / wrong / empty ให้ทุกค่าที่อ่านได้",
   expectNoNames:"เลือกโมเดลก่อน แล้วรายชื่อคลาสจะขึ้นมาให้เลือกตรงนี้",
-  filterPh:"เว้นว่าง = ทุกคลาส เช่น person,helmet", pDeployName:"ชื่อไฟล์โมเดลตอน deploy",
+  cntHowTo:"ดูการนับสด: เปิด <b>Live camera</b> + ติ๊ก <b>Read live</b> แล้วเลื่อนของข้ามเส้น — นับแล้วเส้นจะกะพริบเขียว <b>+1</b> และเลขบนป้ายเส้นจะขึ้น",
+  cntReset:"รีเซ็ตตัวนับ", cntNeedDetector:"ยังไม่ได้เลือกโมเดลที่ “โมเดลตรวจจับของกล้องนี้” (แผงซ้าย)",
+  cntNeedLive:"การนับข้ามเส้นต้องใช้ภาพที่เคลื่อนไหว — เปิด Live camera แล้วติ๊ก Read live",
+  cntEstimate:"ประมาณการในเบราว์เซอร์ · ตัวเลขจริงดูจาก runner บนเครื่อง",
+  clsAll:"ทุกคลาส", clsAllTip:"ใช้ทุกคลาสที่โมเดลรู้จัก",
+  clsSumAll:"ใช้ทุกคลาส ({n} คลาส) · คลิกชื่อคลาสเพื่อเลือกเฉพาะคลาสนั้น",
+  clsSumSome:"เฉพาะ {list} ({k} จาก {n} คลาส) · คลิก ทุกคลาส เพื่อกลับไปใช้ทั้งหมด",
+  clsUnknown:"โมเดลนี้ไม่มีคลาสนี้ — คลิกเพื่อเอาออก",
+  clsNeedDetector:"เลือกโมเดลที่ “โมเดลตรวจจับของกล้องนี้” (แผงซ้าย) ก่อน แล้วรายชื่อคลาสจะขึ้นให้คลิกตรงนี้",
+  clsNoNames:"ไฟล์โมเดลนี้ไม่มีรายชื่อคลาส — ลบโมเดลออกแล้วเพิ่มใหม่ พร้อมใส่รายชื่อคลาส",
+  pDeployName:"ชื่อไฟล์โมเดลตอน deploy",
   pReadQr:"อ่าน QR", pReadBarcode:"อ่านบาร์โค้ดแท่ง",
   barcodeFormats:"รองรับ QR · Code 128 · Code 39 · EAN-13 · UPC-A · EAN-8 · ITF<br>ทุกฟอร์แมตตรวจ checksum ก่อนตอบ จึงมักจะ<b>อ่านไม่เจอ</b> มากกว่า<b>อ่านผิด</b><br>วางกรอบให้คลุมทั้งบาร์โค้ดรวมขอบขาวซ้ายขวา และให้แท่งตั้งตรง (เอียงได้ราว 8°)",
   pSensitivity:"Sensitivity", pMinRatio:"min_ratio", pReference:"ภาพอ้างอิง",
@@ -4259,8 +4274,8 @@ th: {
   hint_gauge_needle:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือเข็มที่ระบบเจอ เส้นทองคือสองมุมอ้างอิง",
   hint_level_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า ดูแถบภาพและกราฟด้านล่างประกอบ",
   hint_measure_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือขอบที่ระบบเจอ",
-  hint_line_count:"การนับต้องใช้การติดตามข้ามหลายเฟรม ทดสอบจริงด้วย Python",
-  hint_zone_count:"การนับต้องใช้โมเดลตรวจจับ ทดสอบจริงด้วย Python",
+  hint_line_count:"เปิด Live camera + ติ๊ก Read live แล้วเลื่อนของข้ามเส้น เพื่อดูการนับสด",
+  hint_zone_count:"เลือกโมเดลที่ “โมเดลตรวจจับของกล้องนี้” แล้วกด ทดสอบเลย หรือติ๊ก Read live",
   hintDefault:"กดปุ่ม \u201cทดสอบเลย\u201d ด้านบนเพื่ออ่านค่า",
   testFailed:"ทดสอบไม่สำเร็จ: ",
 
@@ -4432,7 +4447,17 @@ en: {
   expectUnknown:"(not in this model)",
   expectHint:"Filters nothing — every class is still detected. It only adds an ok / wrong / empty verdict to each reading",
   expectNoNames:"Pick a model above and its class list appears here",
-  filterPh:"blank = all classes, e.g. person,helmet", pDeployName:"Model filename at deploy time",
+  cntHowTo:"To watch it count: <b>Live camera</b> + tick <b>Read live</b>, then move the object across — the line flashes green with <b>+1</b> and the number on its label goes up",
+  cntReset:"Reset count", cntNeedDetector:"No model picked in Detector for this camera (left panel)",
+  cntNeedLive:"Counting across a line needs moving pictures — switch to Live camera and tick Read live",
+  cntEstimate:"Estimated in the browser · the runner on the device gives the real count",
+  clsAll:"All classes", clsAllTip:"Use every class the model knows",
+  clsSumAll:"All {n} classes are used · click a class to keep only that one",
+  clsSumSome:"Only {list} ({k} of {n}) · click All classes to use every class again",
+  clsUnknown:"This model has no such class — click to remove",
+  clsNeedDetector:"Pick a model in Detector for this camera (left panel) and its classes appear here to click",
+  clsNoNames:"This model file carries no class names — remove it and add it again with its class list",
+  pDeployName:"Model filename at deploy time",
   pReadQr:"Read QR", pReadBarcode:"Read linear barcodes",
   barcodeFormats:"Supports QR · Code 128 · Code 39 · EAN-13 · UPC-A · EAN-8 · ITF<br>Every format is checksum-validated, so it will <b>fail to read</b> far more often than it will <b>read wrong</b><br>Frame the whole barcode including the white quiet zones, and keep the bars upright (about 8° of tilt is fine)",
   pSensitivity:"Sensitivity", pMinRatio:"min_ratio", pReference:"Reference frame",
@@ -4512,8 +4537,8 @@ en: {
   hint_gauge_needle:"Re-reads instantly as you change values. Red is the needle it found, gold the two reference angles.",
   hint_level_line:"Re-reads instantly as you change values. The strip and graph below show what it sees.",
   hint_measure_line:"Re-reads instantly as you change values. The red marks are the edges it found.",
-  hint_line_count:"Counting needs tracking across frames — test it for real with Python.",
-  hint_zone_count:"Counting needs a detector model — test it for real with Python.",
+  hint_line_count:"Switch to Live camera, tick Read live and move something across the line to watch it count.",
+  hint_zone_count:"Pick a model in Detector for this camera, then press Test now or tick Read live.",
   hintDefault:"Press \u201cTest now\u201d above to read a value",
   testFailed:"Test failed: ",
 
@@ -4863,6 +4888,7 @@ function draw(){
 
   const c = cam();
   if(c) c.rois.forEach(roi => drawRoi(roi, roi.id === state.sel));
+  drawTally();
   if(drag && drag.mode === "create" && drag.box) drawGhost(drag.box);
   const sc = c && c.scale;
   const refPts = (drag && drag.mode === "scale" && drag.b) ? [drag.a, drag.b]
@@ -4904,6 +4930,10 @@ function drawShape(roi, active){
   ctx.globalAlpha = roi.enabled === false ? .5 : 1;
   ctx.strokeStyle = roi.enabled === false ? "#5A5A5A" : col;
   ctx.lineWidth = active ? 3 : 2;
+  // a crossing turns the line green for a moment and says which way it went
+  const fl = gate.flash[roi.id];
+  const flashing = fl && performance.now() - fl.t < 900;
+  if(flashing){ ctx.strokeStyle = "#46C06E"; ctx.lineWidth = 5; }
 
   if(roi.shape === "polygon"){
     ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
@@ -4945,12 +4975,23 @@ function drawShape(roi, active){
     const shown = res && res.value !== null && res.value !== undefined && res.value !== ""
                   ? String(res.value) : null;
     const txt = shown !== null ? roi.name + "  =  " + shown : roi.name + "  ·  " + roi.task;
-    ctx.font = "11px ui-monospace, monospace";
+    // a live count is the thing you are watching, so it is drawn larger
+    const big = shown !== null && COUNT_TASKS.indexOf(roi.task) >= 0;
+    const fh = big ? 20 : 16;
+    ctx.font = big ? "bold 14px ui-monospace, monospace" : "11px ui-monospace, monospace";
     const tw = ctx.measureText(txt).width + 10;
     ctx.fillStyle = "rgba(11,11,11,.88)";
-    ctx.fillRect(top.x, top.y - 21, tw, 16);
-    ctx.fillStyle = col; ctx.fillRect(top.x, top.y - 21, 3, 16);
-    ctx.fillStyle = "#F2F2F2"; ctx.fillText(txt, top.x + 7, top.y - 9);
+    ctx.fillRect(top.x, top.y - fh - 5, tw, fh);
+    ctx.fillStyle = col; ctx.fillRect(top.x, top.y - fh - 5, 3, fh);
+    ctx.fillStyle = "#F2F2F2"; ctx.fillText(txt, top.x + 7, top.y - (big ? 10 : 9));
+  }
+  if(flashing && pts.length >= 2){
+    const mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+    const txt = "+1 " + fl.label;
+    ctx.font = "bold 16px ui-monospace, monospace";
+    const tw = ctx.measureText(txt).width + 14;
+    ctx.fillStyle = "rgba(11,11,11,.9)"; ctx.fillRect(mx - tw/2, my - 40, tw, 24);
+    ctx.fillStyle = "#46C06E"; ctx.fillText(txt, mx - tw/2 + 7, my - 22);
   }
 
   if(active){
@@ -5410,12 +5451,72 @@ function sel(obj, key, options){
 function rowOf(nodes){ const d = document.createElement("div"); d.className = "row";
   nodes.forEach(n => d.appendChild(n)); return d; }
 
+/* Which classes to keep - clicked, never typed.
+
+   The runner keeps a detection only when its class name matches EXACTLY. A
+   typed "orange" for a model that says "Orange", or "oragne", filtered every
+   detection out: the line never counted and nothing said why. So the names
+   come from the model and you click them. Nothing picked = every class, the
+   same [] the runner has always read as "all". A name the model does not have
+   (from an imported config) stays visible in red so it can be removed. */
+function classPicker(known, current, onChange, emptyText){
+  const wrap = document.createElement("div");
+  const sel = (current || []).slice();
+  const order = n => { const i = known.indexOf(n); return i < 0 ? 1e9 : i; };
+  const commit = () => {
+    sel.sort((a, b) => order(a) - order(b));
+    if(known.length > 1 && known.every(n => sel.indexOf(n) >= 0))
+      sel.splice(0, sel.length);               // every class ticked = all
+    onChange(sel.slice());
+    draw();
+  };
+  const draw = () => {
+    wrap.innerHTML = "";
+    const row = document.createElement("div"); row.className = "chips";
+    const chip = (text, on, warn, title, fn) => {
+      const b = document.createElement("button"); b.type = "button";
+      b.className = "chip pick" + (on ? " on" : "") + (warn ? " warn" : "");
+      b.textContent = text; if(title) b.title = title;
+      b.onclick = fn; row.appendChild(b);
+    };
+    if(known.length){
+      chip((sel.length ? "" : "✓ ") + t("clsAll"), !sel.length, false, t("clsAllTip"),
+           () => { sel.splice(0, sel.length); commit(); });
+      known.forEach((n, i) => {
+        const on = sel.indexOf(n) >= 0;
+        chip((on ? "✓ " : "") + i + " " + n, on, false, null, () => {
+          const k = sel.indexOf(n);
+          if(k >= 0) sel.splice(k, 1); else sel.push(n);
+          commit();
+        });
+      });
+    }
+    sel.filter(n => known.indexOf(n) < 0).forEach(n =>
+      chip("✕ " + n, true, true, t("clsUnknown"), () => { sel.splice(sel.indexOf(n), 1); commit(); }));
+    if(row.childNodes.length) wrap.appendChild(row);
+    const h = document.createElement("div"); h.className = "hint";
+    const kept = sel.filter(n => known.indexOf(n) >= 0);
+    h.textContent = !known.length ? emptyText
+      : !sel.length ? t("clsSumAll").replace("{n}", known.length)
+      : t("clsSumSome").replace("{list}", kept.join(", ") || "—")
+                       .replace("{k}", kept.length).replace("{n}", known.length);
+    wrap.appendChild(h);
+  };
+  draw();
+  return wrap;
+}
+/* the class names of this camera's detector; null when none is picked */
+function detectorNames(){
+  const c = cam(), d = c && c.detector;
+  if(!d || !d.id && !d.path) return null;
+  const m = models.find(x => x.id === d.id);
+  return (m && m.names && m.names.length) ? m.names : (d.class_names || []);
+}
 function classFilterField(r){
-  const i = document.createElement("input");
-  i.value = (r.params.classes || []).join(",");
-  i.placeholder = t("filterPh");
-  i.oninput = () => r.params.classes = i.value.split(",").map(x => x.trim()).filter(Boolean);
-  return field(t("pFilterClasses"), i);
+  const names = detectorNames();
+  return field(t("pFilterClasses"),
+    classPicker(names || [], r.params.classes, v => r.params.classes = v,
+                names === null ? t("clsNeedDetector") : t("clsNoNames")));
 }
 function camScaleText(){
   const c = cam();
@@ -5461,6 +5562,14 @@ function renderTaskParams(r){
     const h1 = document.createElement("div"); h1.className = "hint";
     h1.innerHTML = t("countHint");
     add(h1);
+    const live1 = document.createElement("div"); live1.className = "hint";
+    live1.innerHTML = t("cntHowTo");
+    add(live1);
+    const rb = document.createElement("button");
+    rb.type = "button"; rb.textContent = t("cntReset");
+    rb.onclick = () => { resetTally(r.id); delete live.results[r.id]; updatePreviewNow(); invalidate(); };
+    add(rb);
+    if(p.invert === undefined) p.invert = false;     // an imported config may leave it out
     add(rowOf([field(t("pLabelIn"), txt(p,"label_in")),
                field(t("pLabelOut"), txt(p,"label_out"))]));
     add(rowOf([field(t("pInvert"), sel(p,"invert",[[false,t("no")],[true,t("yes")]])),
@@ -5589,11 +5698,9 @@ function renderTaskParams(r){
     if(r.task === "yolo_detect"){
       add(field(t("pOutput"), sel(p,"output",
         [["count",t("outCount")],["classes",t("outClasses")],["items",t("outItems")]])));
-      const cls = document.createElement("input");
-      cls.value = (r.model.classes || []).join(",");
-      cls.placeholder = t("filterPh");
-      cls.oninput = () => r.model.classes = cls.value.split(",").map(s => s.trim()).filter(Boolean);
-      add(field(t("pFilterClasses"), cls));
+      add(field(t("pFilterClasses"),
+        classPicker(known, r.model.classes, v => r.model.classes = v,
+                    picked || r.model.id ? t("clsNoNames") : t("expectNoNames"))));
     }
     add(field(t("pDeployName"), txt(r.model,"path")));
   } else if(r.task === "barcode_qr"){
@@ -5745,6 +5852,7 @@ P("camDetector").onchange = () => {
   const m = models.find(x => x.id === P("camDetector").value);
   if(m) c.detector = attachModel(Object.assign({}, c.detector || {}), m);
   else delete c.detector;
+  syncProps();
 };
 
 /* ------------------------------ background image ------------------------------ */
@@ -7679,16 +7787,178 @@ async function evalRoi(roi){
   return {value:null, conf:0, crop, note: t("taskBrowserNo")};
 }
 
+/* ==================================================================
+   Counting lines and zones in the browser, so you can watch a line count
+   while you set it up. The same recipe as the runner: ONE detection per
+   frame with the camera's detector, a greedy IoU tracker, and the gate rule
+   of tesr_line_engine.LineCounter (a track whose centre moves from one side
+   of the line to the other, through the line and not round its end).
+   It is an estimate: the browser reads a few frames a second, the runner many,
+   so the number the runner prints on the device is the one to trust.
+   ================================================================== */
+const gate = {camId:null, tracks:{}, next:1, seen:{}, counts:{}, flash:{}, dets:[], canvas:null};
+const COUNT_TASKS = ["line_count", "zone_count"];
+
+function resetTally(roiId){
+  if(roiId){ delete gate.counts[roiId]; delete gate.seen[roiId]; delete gate.flash[roiId]; return; }
+  gate.tracks = {}; gate.next = 1; gate.seen = {}; gate.counts = {}; gate.flash = {}; gate.dets = [];
+}
+function boxIou(a, b){
+  const x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[2], b[2]), y2 = Math.min(a[3], b[3]);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  if(inter <= 0) return 0;
+  const ua = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter;
+  return ua > 0 ? inter / ua : 0;
+}
+/* tesr_line_engine.Tracker. max_dist is wider than the runner's 0.08 because
+   the browser sees far fewer frames, so things move further between them. */
+function trackUpdate(dets, w, h){
+  const IOU = 0.3, MAX_AGE = 12, MAX_DIST = 0.15, diag = Math.hypot(w, h) || 1;
+  const T = gate.tracks;
+  for(const id in T){ T[id].age++; T[id].matched = false; }
+  dets.slice().sort((a, b) => b.conf - a.conf).forEach(d => {
+    const box = d.box, c = [(box[0]+box[2])/2, (box[1]+box[3])/2];
+    let best = null, bestScore = 0;
+    for(const id in T){
+      const tr = T[id]; if(tr.matched) continue;
+      let score = boxIou(box, tr.box);
+      if(score < IOU){
+        const dist = Math.hypot(c[0]-tr.c[0], c[1]-tr.c[1]) / diag;
+        score = dist < MAX_DIST ? (1 - dist / MAX_DIST) * IOU : 0;
+      }
+      if(score > bestScore){ best = id; bestScore = score; }
+    }
+    if(best === null){
+      T[gate.next++] = {box, c, prev:c, age:0, hits:1, cls:d.name, conf:d.conf, matched:true};
+    } else {
+      const tr = T[best];
+      tr.prev = tr.c; tr.box = box; tr.c = c; tr.age = 0; tr.hits++;
+      tr.matched = true; tr.cls = d.name; tr.conf = d.conf;
+    }
+  });
+  for(const id in T) if(T[id].age > MAX_AGE) delete T[id];
+}
+function gateSide(pt, a, b){
+  const dx = b[0]-a[0], dy = b[1]-a[1], n = Math.hypot(dx, dy) || 1;
+  const v = (pt[0]-a[0]) * (dy/n) + (pt[1]-a[1]) * (-dx/n);
+  return v > 1e-9 ? 1 : v < -1e-9 ? -1 : 0;
+}
+function lineSide(pt, a, b){
+  const v = (b[0]-a[0])*(pt[1]-a[1]) - (b[1]-a[1])*(pt[0]-a[0]);
+  return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+function segCross(p1, p2, p3, p4){
+  return lineSide(p1, p3, p4) !== lineSide(p2, p3, p4) &&
+         lineSide(p3, p1, p2) !== lineSide(p4, p1, p2);
+}
+function inPoly(pt, poly){
+  let inside = false;
+  for(let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if((yi > pt[1]) !== (yj > pt[1]) &&
+       pt[0] < (xj - xi) * (pt[1] - yi) / ((yj - yi) || 1e-12) + xi) inside = !inside;
+  }
+  return inside;
+}
+function countLineJS(roi, w, h){
+  const p = roi.params || {}, keep = p.classes || [];
+  const [a, b] = roi.points.slice(0, 2).map(q => [q[0]*w, q[1]*h]);
+  const cnt = gate.counts[roi.id] || (gate.counts[roi.id] = {i:0, o:0});
+  const seen = gate.seen[roi.id] || (gate.seen[roi.id] = {});
+  for(const id in gate.tracks){
+    const tr = gate.tracks[id];
+    if(tr.hits < 2 || tr.age > 0) continue;
+    if(keep.length && keep.indexOf(tr.cls) < 0) continue;
+    const side = gateSide(tr.c, a, b), prev = seen[id];
+    seen[id] = side;
+    if(prev === undefined || !side || !prev || side === prev) continue;
+    if(!segCross(tr.prev, tr.c, a, b)) continue;     // went round the end of the line
+    let goingIn = side > 0;
+    if(p.invert) goingIn = !goingIn;
+    if(goingIn) cnt.i++; else cnt.o++;
+    gate.flash[roi.id] = {t: performance.now(), label: goingIn ? (p.label_in || "in") : (p.label_out || "out")};
+  }
+  for(const id in seen) if(!gate.tracks[id]) delete seen[id];
+  return cnt;
+}
+function countZoneJS(roi, items, w, h){
+  const p = roi.params || {}, keep = p.classes || [];
+  const poly = roi.points.map(q => [q[0]*w, q[1]*h]);
+  let n = 0;
+  items.forEach(it => {
+    if(keep.length && keep.indexOf(it.name) < 0) return;
+    const bx = it.box;
+    const pt = p.anchor === "bottom" ? [(bx[0]+bx[2])/2, bx[3]] : [(bx[0]+bx[2])/2, (bx[1]+bx[3])/2];
+    if(inPoly(pt, poly)) n++;
+  });
+  return n;
+}
+async function runCameraCounting(c){
+  const rois = c.rois.filter(r => r.enabled !== false && COUNT_TASKS.indexOf(r.task) >= 0
+                                && r.points && r.points.length >= 2);
+  if(gate.camId !== c.id){ resetTally(); gate.camId = c.id; }
+  if(!rois.length){ gate.dets = []; return; }
+  const put = (r, res) => { live.results[r.id] = res; };
+  const m = c.detector && models.find(x => x.id === c.detector.id);
+  if(!m){ gate.dets = []; rois.forEach(r => put(r, {value:null, conf:0, note:t("cntNeedDetector")})); return; }
+  const el = sourceEl(); if(!el) return;
+  const {w, h} = sourceSize();
+  const cv = gate.canvas || (gate.canvas = document.createElement("canvas"));
+  if(cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; }
+  cv.getContext("2d", {willReadFrequently:true}).drawImage(el, 0, 0, w, h);
+  let r;
+  try{ r = await runModel(m, cv, c.detector); }
+  catch(e){ rois.forEach(x => put(x, {value:null, conf:0, note:t("modelRunFail") + e.message})); return; }
+  gate.dets = r.items;
+  const moving = liveReady();
+  if(moving) trackUpdate(r.items, w, h);
+  rois.forEach(roi => {
+    const p = roi.params || {};
+    if(roi.task === "line_count"){
+      if(!moving){ put(roi, {value:null, conf:0, note:t("cntNeedLive")}); return; }
+      const k = countLineJS(roi, w, h);
+      put(roi, {value: (p.label_in || "in") + " " + k.i + " · " + (p.label_out || "out") + " " + k.o,
+                conf:1, note:t("cntEstimate")});
+    } else {
+      put(roi, {value: countZoneJS(roi, r.items, w, h), conf:1, note:t("cntEstimate")});
+    }
+  });
+}
+/* what the camera's detector found, drawn faintly so you can see what the
+   line is following: no box on the orange = nothing to count */
+function drawTally(){
+  const c = cam();
+  if(!c || gate.camId !== c.id || !gate.dets.length) return;
+  if(!c.rois.some(r => r.enabled !== false && COUNT_TASKS.indexOf(r.task) >= 0)) return;
+  ctx.save();
+  ctx.setLineDash([5, 3]); ctx.lineWidth = 1.4; ctx.strokeStyle = "#7FD3E0";
+  ctx.font = "10px ui-monospace, monospace";
+  gate.dets.forEach(d => {
+    const a = toScr(d.box[0], d.box[1]), b = toScr(d.box[2], d.box[3]);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    const txt = d.name + " " + d.conf.toFixed(2);
+    ctx.fillStyle = "rgba(11,11,11,.8)";
+    ctx.fillRect(a.x, b.y + 2, ctx.measureText(txt).width + 8, 14);
+    ctx.fillStyle = "#7FD3E0"; ctx.fillText(txt, a.x + 4, b.y + 12);
+    const m = toScr((d.box[0]+d.box[2])/2, (d.box[1]+d.box[3])/2);
+    ctx.setLineDash([]); ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, 7); ctx.fillStyle = "#7FD3E0"; ctx.fill();
+    ctx.setLineDash([5, 3]);
+  });
+  ctx.restore();
+}
+
 async function evalAll(){
   const c = cam(); if(!c || live.busy) return;
   live.busy = true;
   try{
+    await runCameraCounting(c);
     for(const roi of c.rois){
-      if(roi.enabled === false) continue;
+      if(roi.enabled === false || COUNT_TASKS.indexOf(roi.task) >= 0) continue;
       const r = await evalRoi(roi);
       if(r) live.results[roi.id] = r;
     }
-  } finally { live.busy = false; invalidate(); }
+  } finally { live.busy = false; invalidate(); if(selRoi()) updatePreview(); }
 }
 
 /* the one button the preview panel tells people to press */
@@ -7782,8 +8052,9 @@ P("btnTestRoi").onclick = async () => {
   const b = P("btnTestRoi");
   b.disabled = true; b.textContent = t("testing");
   try{
-    const res = await evalRoi(r);
-    if(res) live.results[r.id] = res;
+    let res;
+    if(COUNT_TASKS.indexOf(r.task) >= 0){ await runCameraCounting(cam()); res = live.results[r.id]; }
+    else { res = await evalRoi(r); if(res) live.results[r.id] = res; }
     if(res && res.note) toast(res.note);
   }catch(e){ toast(t("testFailed") + e.message); }
   b.disabled = false; b.textContent = t("testNow");
@@ -8161,6 +8432,7 @@ function renderModels(){
     box.appendChild(d);
   });
   P("modelCount").textContent = models.length;
+  syncDetectorUi();
 }
 let pendingBytes = null;
 P("btnAddModel").onclick = () => {
