@@ -543,7 +543,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.0"
+STUDIO_VERSION = "1.8.1"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -4049,7 +4049,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.8.0";
+const STUDIO_VERSION = "1.8.1";
 
 const I18N = {
 th: {
@@ -4182,9 +4182,9 @@ th: {
   expectUnknown:"(ไม่มีในโมเดลนี้)",
   expectHint:"ไม่กรองอะไรทั้งสิ้น — ยังเห็นทุกคลาสเหมือนเดิม แค่เพิ่มคำตัดสิน ok / wrong / empty ให้ทุกค่าที่อ่านได้",
   expectNoNames:"เลือกโมเดลก่อน แล้วรายชื่อคลาสจะขึ้นมาให้เลือกตรงนี้",
-  cntHowTo:"ดูการนับสด: เปิด <b>Live camera</b> + ติ๊ก <b>Read live</b> แล้วเลื่อนของข้ามเส้น — นับแล้วเส้นจะกะพริบเขียว <b>+1</b> และเลขบนป้ายเส้นจะขึ้น",
+  cntHowTo:"ดูการนับสด: กด <b>กล้องสด</b> + ติ๊ก <b>อ่านค่าสด</b> แล้วเลื่อนของข้ามเส้น — นับแล้วเส้นจะกะพริบเขียว <b>+1</b> และเลขบนป้ายเส้นจะขึ้น",
   cntReset:"รีเซ็ตตัวนับ", cntNeedDetector:"ยังไม่ได้เลือกโมเดลที่ “โมเดลตรวจจับของกล้องนี้” (แผงซ้าย)",
-  cntNeedLive:"การนับข้ามเส้นต้องใช้ภาพที่เคลื่อนไหว — เปิด Live camera แล้วติ๊ก Read live",
+  cntNeedLive:"การนับข้ามเส้นต้องใช้ภาพที่เคลื่อนไหว — กด กล้องสด แล้วติ๊ก อ่านค่าสด",
   cntEstimate:"ประมาณการในเบราว์เซอร์ · ตัวเลขจริงดูจาก runner บนเครื่อง",
   clsAll:"ทุกคลาส", clsAllTip:"ใช้ทุกคลาสที่โมเดลรู้จัก",
   clsSumAll:"ใช้ทุกคลาส ({n} คลาส) · คลิกชื่อคลาสเพื่อเลือกเฉพาะคลาสนั้น",
@@ -4274,8 +4274,8 @@ th: {
   hint_gauge_needle:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือเข็มที่ระบบเจอ เส้นทองคือสองมุมอ้างอิง",
   hint_level_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า ดูแถบภาพและกราฟด้านล่างประกอบ",
   hint_measure_line:"อ่านใหม่ทันทีทุกครั้งที่แก้ค่า เส้นแดงคือขอบที่ระบบเจอ",
-  hint_line_count:"เปิด Live camera + ติ๊ก Read live แล้วเลื่อนของข้ามเส้น เพื่อดูการนับสด",
-  hint_zone_count:"เลือกโมเดลที่ “โมเดลตรวจจับของกล้องนี้” แล้วกด ทดสอบเลย หรือติ๊ก Read live",
+  hint_line_count:"กด กล้องสด + ติ๊ก อ่านค่าสด แล้วเลื่อนของข้ามเส้น เพื่อดูการนับสด",
+  hint_zone_count:"เลือกโมเดลที่ “โมเดลตรวจจับของกล้องนี้” แล้วกด ทดสอบเลย หรือติ๊ก อ่านค่าสด",
   hintDefault:"กดปุ่ม \u201cทดสอบเลย\u201d ด้านบนเพื่ออ่านค่า",
   testFailed:"ทดสอบไม่สำเร็จ: ",
 
