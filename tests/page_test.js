@@ -181,7 +181,7 @@ whenReady(() => {
   check("quickstart does not tell you to copy the .onnx",
         stale.test(G("quickstart")("p_config.json", "p_project.zip", [mdl], 1024)), false);
 
-  console.log("\n--- classes are clicked, not typed (v1.7.6) ---");
+  console.log("\n--- classes are clicked, not typed (v1.8.0) ---");
   const cp = G("classPicker");
   let got = null;
   const names = ["Red_Apple", "Green_Apple", "Orange", "Lemon"];
