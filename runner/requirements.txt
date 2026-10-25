@@ -10,6 +10,7 @@ numpy>=1.20
 
 # --- optional, install only what your ROI tasks need -------------------
 # tesserocr>=2.12         # ocr_text / plate_ocr - Tesseract INSIDE the venv, nothing to install on
+# pillow>=9               # with OCR: draws Thai (any non-ASCII) readings on the window
 #                          # Windows, Linux PC, Pi, Jetson. Language data downloads itself on first run.
 # pytesseract>=0.3.10     # the older route: also needs the Tesseract program installed on the OS (macOS)
 # easyocr>=1.7            # ocr_text  (heavier, works offline, GPU optional)

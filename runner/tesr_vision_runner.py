@@ -59,7 +59,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.4"
+STUDIO_VERSION = "1.8.5"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1201,8 +1201,7 @@ def onnx_detect(crop, roi):
             items.append({"class": name, "conf": round(float(conf[i]), 3),
                           "box": [x1, y1, x2, y2]})
             cv2.rectangle(dbg, (x1, y1), (x2, y2), (6, 0, 243), 2)
-            cv2.putText(dbg, "%s %.2f" % (name, conf[i]), (x1, max(12, y1 - 4)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (6, 0, 243), 1, cv2.LINE_AA)
+            _text(dbg, "%s %.2f" % (name, conf[i]), (x1, max(12, y1 - 4)), 0.4, (6, 0, 243))
 
     p = roi.get("params") or {}
     mode = p.get("output", "count")
@@ -1270,8 +1269,7 @@ def task_yolo_detect(crop, roi):
         items.append({"class": name, "conf": round(cf, 3), "box": [x1, y1, x2, y2]})
         confs.append(cf)
         cv2.rectangle(dbg, (x1, y1), (x2, y2), (6, 0, 243), 2)               # TESR red
-        cv2.putText(dbg, "%s %.2f" % (name, cf), (x1, max(12, y1 - 4)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (6, 0, 243), 1, cv2.LINE_AA)
+        _text(dbg, "%s %.2f" % (name, cf), (x1, max(12, y1 - 4)), 0.4, (6, 0, 243))
     p = roi.get("params") or {}
     if p.get("output", "count") == "count":
         value = len(items)
@@ -2266,8 +2264,246 @@ def draw_mark(img, x, y, r):
     cv2.circle(img, (x, y), max(1, r // 3), TESR_RED, -1, cv2.LINE_AA)
 
 
+# --------------------------------------------------------------------------
+# text that is not plain ASCII - Thai readings, Thai names, Thai classes
+# --------------------------------------------------------------------------
+# cv2.putText only has the Hershey fonts, which hold printable ASCII and
+# nothing else, so a plate read as 1กข1234 was drawn as 1??????1234 while the
+# console printed it correctly. Anything outside ASCII is drawn with Pillow and
+# a font that has Thai in it; plain ASCII keeps the fast cv2 path.
+
+FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/kanit/Kanit-Regular.ttf"
+# best first; the first one this computer has wins
+_FONT_NAMES = (
+    "leelawui.ttf", "leelawad.ttf", "tahoma.ttf",                 # Windows (always has Tahoma)
+    "thonburi.ttc", "thonburi.ttf", "ayuthaya.ttf", "sathu.ttf",  # macOS
+    "loma.otf", "loma.ttf", "garuda.otf", "garuda.ttf",           # Linux / Pi / Jetson (fonts-thai-tlwg)
+    "norasi.otf", "norasi.ttf", "waree.otf", "waree.ttf",
+    "notosansthai-regular.ttf", "notosansthaiui-regular.ttf",
+    "sarabun-regular.ttf", "kanit-regular.ttf",
+)
+_FONT = {"path": None, "looked": False, "fetched": False, "dest": None,
+         "basic": True, "cache": {}, "masks": {}}
+
+# A tone mark after an upper vowel (ที่ ปั้น) has to sit higher than a tone mark
+# alone. Without a text shaper (Pillow's raqm, missing on Windows) both land
+# in the same spot and the tone mark disappears into the vowel, so in that case
+# it is drawn on its own, lifted.
+_UPPER_VOWEL = set("\u0e31\u0e34\u0e35\u0e36\u0e37\u0e47\u0e4d")
+_TONE_MARK = set("\u0e48\u0e49\u0e4a\u0e4b\u0e4c")
+
+
+def _font_dirs():
+    if platform.system() == "Windows":
+        win = os.environ.get("WINDIR", r"C:\Windows")
+        return [os.path.join(win, "Fonts"),
+                os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts")]
+    if platform.system() == "Darwin":
+        return ["/System/Library/Fonts", "/System/Library/Fonts/Supplemental",
+                "/Library/Fonts", os.path.expanduser("~/Library/Fonts")]
+    return ["/usr/share/fonts", "/usr/local/share/fonts",
+            os.path.expanduser("~/.local/share/fonts"), os.path.expanduser("~/.fonts")]
+
+
+def text_setup(config_path=None):
+    """Remember where ./fonts would go; nothing is searched until it is needed."""
+    base = os.path.dirname(os.path.abspath(config_path)) if config_path else os.getcwd()
+    _FONT["dest"] = os.path.join(base, "fonts")
+
+
+def _find_font():
+    """./fonts first (put any Thai .ttf there to choose it), then the system."""
+    bases = [os.getcwd(), os.path.dirname(os.path.abspath(__file__))]
+    if _FONT["dest"]:
+        bases.insert(0, os.path.dirname(_FONT["dest"]))
+    for b in bases:
+        d = os.path.join(b, "fonts")
+        if os.path.isdir(d):
+            for f in sorted(os.listdir(d)):
+                if f.lower().endswith((".ttf", ".otf", ".ttc")):
+                    return os.path.join(d, f)
+    seen = {}
+    for d in _font_dirs():
+        if not os.path.isdir(d):
+            continue
+        for root, _dirs, files in os.walk(d):
+            for f in files:
+                seen.setdefault(f.lower(), os.path.join(root, f))
+    for name in _FONT_NAMES:
+        if name in seen:
+            return seen[name]
+    return None
+
+
+def _fetch_font():
+    """No Thai font on this computer (Raspberry Pi OS Lite, a bare Jetson):
+    download Kanit (SIL Open Font License) into ./fonts, once."""
+    import urllib.request
+    dest = _FONT["dest"] or os.path.join(os.getcwd(), "fonts")
+    path = os.path.join(dest, "Kanit-Regular.ttf")
+    part = path + ".part"
+    try:
+        os.makedirs(dest, exist_ok=True)
+        with urllib.request.urlopen(FONT_URL, timeout=15) as r, open(part, "wb") as fh:
+            fh.write(r.read())
+        if os.path.getsize(part) < 50000:
+            raise IOError("got %d bytes - not a font" % os.path.getsize(part))
+        os.replace(part, path)
+        log("labels   : no Thai font on this computer - downloaded %s" % path)
+        return path
+    except Exception as exc:
+        if os.path.exists(part):
+            os.remove(part)
+        log("labels   : could not download a Thai font (%s) - Thai labels on the window "
+            "show as ?, the console and outputs are not affected. Fix: put any Thai "
+            ".ttf in a folder named fonts next to this script" % exc, "WARN")
+        return None
+
+
+def _unicode_ready():
+    if _FONT["path"]:
+        return True
+    if _FONT["looked"]:
+        return False
+    _FONT["looked"] = True
+    try:
+        from PIL import ImageFont, features  # noqa: F401 - Pillow comes with tesserocr
+    except ImportError:
+        log("labels   : Pillow is not installed, so Thai labels on the window show as ?. "
+            "Fix: pip install pillow", "WARN")
+        return False
+    _FONT["path"] = _find_font() or _fetch_font()
+    if not _FONT["path"]:
+        return False
+    try:
+        _FONT["basic"] = not features.check_feature("raqm")
+    except Exception:
+        _FONT["basic"] = True
+    log("labels   : Thai and other non-ASCII text drawn with %s"
+        % os.path.basename(_FONT["path"]))
+    return True
+
+
+def _font_px(scale):
+    # Hershey simplex digits are about 22 px tall at scale 1; a TrueType digit
+    # is about 0.7 of the font size. Same height on screen, either way.
+    return max(9, int(round(scale * 31)))
+
+
+def _ft(px):
+    f = _FONT["cache"].get(px)
+    if f is None:
+        from PIL import ImageFont
+        eng = ImageFont.Layout.BASIC if _FONT["basic"] else ImageFont.Layout.RAQM
+        f = _FONT["cache"][px] = ImageFont.truetype(_FONT["path"], px, layout_engine=eng)
+    return f
+
+
+def _tone_lift(font):
+    """How far a tone mark must rise to clear an upper vowel in this font.
+
+    Fonts made for the old Windows and Mac way (Tahoma, Leelawadee, the tlwg
+    fonts) already park tone marks up high, so they need nothing; fonts made
+    for a text shaper (Kanit, Sarabun, Noto) park them low and need lifting."""
+    if not hasattr(font, "_tesr_lift"):
+        try:
+            from PIL import Image, ImageDraw
+
+            def rows(ch):                   # ink rows of one mark, drawn on a base
+                im = Image.new("L", (font.size * 3, font.size * 3), 0)
+                ImageDraw.Draw(im).text((font.size, font.size * 2), ch, font=font,
+                                        fill=255, anchor="ls")
+                ys = np.nonzero(np.asarray(im).max(axis=1))[0]
+                return int(ys.min()), int(ys.max())
+            tone_top, tone_bottom = rows("\u0e48")
+            vowel_top, _ = rows("\u0e35")
+            gap = max(1, int(round(font.size * 0.06)))
+            font._tesr_lift = max(0, tone_bottom - vowel_top + gap)
+        except Exception:
+            font._tesr_lift = 0
+    return font._tesr_lift
+
+
+def _split_marks(s, font=None):
+    if not _FONT["basic"] or (font is not None and _tone_lift(font) == 0):
+        return s, []
+    base, lifted = [], []
+    for ch in s:
+        if ch in _TONE_MARK and base and base[-1] in _UPPER_VOWEL:
+            lifted.append((len(base), ch))
+        else:
+            base.append(ch)
+    return "".join(base), lifted
+
+
+def _unicode_mask(s, px, bold):
+    """Alpha mask of the string and where its baseline is, cached."""
+    key = (s, px, bold)
+    hit = _FONT["masks"].get(key)
+    if hit is not None:
+        return hit
+    from PIL import Image, ImageDraw
+    font = _ft(px)
+    base, lifted = _split_marks(s, font)
+    asc, desc = font.getmetrics()
+    lift = _tone_lift(font) if lifted else 0
+    pad = 2 + bold
+    w = int(font.getlength(base)) + 2 * pad + 4
+    h = asc + desc + lift + 2 * pad
+    im = Image.new("L", (w, h), 0)
+    d = ImageDraw.Draw(im)
+    y = pad + lift + asc
+    d.text((pad, y), base, font=font, fill=255, anchor="ls", stroke_width=bold, stroke_fill=255)
+    for i, mark in lifted:
+        d.text((pad + font.getlength(base[:i]), y - lift), mark, font=font, fill=255,
+               anchor="ls", stroke_width=bold, stroke_fill=255)
+    hit = (np.asarray(im, np.float32) / 255.0, pad, y)
+    if len(_FONT["masks"]) > 512:           # readings change; do not grow for ever
+        _FONT["masks"].clear()
+    _FONT["masks"][key] = hit
+    return hit
+
+
+def _put_unicode(img, s, org, scale, colour, thick):
+    px = _font_px(scale)
+    m, pad, base_y = _unicode_mask(s, px, 1 if (thick >= 2 and px >= 18) else 0)
+    x0, y0 = int(org[0]) - pad, int(org[1]) - base_y
+    H, W = img.shape[:2]
+    xa, ya, xb, yb = max(0, x0), max(0, y0), min(W, x0 + m.shape[1]), min(H, y0 + m.shape[0])
+    if xa >= xb or ya >= yb:
+        return
+    a = m[ya - y0:yb - y0, xa - x0:xb - x0, None]
+    roi = img[ya:yb, xa:xb]
+    col = np.array(colour[:roi.shape[2]] if roi.ndim == 3 else colour[:1], np.float32)
+    if roi.ndim == 2:
+        a = a[..., 0]
+        col = col[0]
+    roi[:] = (roi * (1.0 - a) + col * a).astype(np.uint8)
+
+
+def _is_ascii(s):
+    try:
+        s.encode("ascii")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
 def _text(img, s, org, scale, colour, thick=1):
+    s = str(s)
+    if not _is_ascii(s) and _unicode_ready():
+        _put_unicode(img, s, org, scale, colour, thick)
+        return
     cv2.putText(img, s, org, cv2.FONT_HERSHEY_SIMPLEX, scale, colour, thick, cv2.LINE_AA)
+
+
+def _text_size(s, scale, thick=1):
+    """(width, height) of the string as _text will draw it."""
+    s = str(s)
+    if not _is_ascii(s) and _unicode_ready():
+        font = _ft(_font_px(scale))
+        return int(font.getlength(_split_marks(s, font)[0])) + 2 * thick, int(round(22 * scale))
+    return cv2.getTextSize(s, cv2.FONT_HERSHEY_SIMPLEX, scale, thick)[0]
 
 
 def _panel(img, x, y, w, h, alpha=0.78):
@@ -2283,7 +2519,7 @@ def _panel(img, x, y, w, h, alpha=0.78):
 
 def _text_w(txt, scale):
     """How wide this string will actually be, in pixels, at this scale."""
-    return cv2.getTextSize(str(txt), cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0][0]
+    return _text_size(txt, scale)[0]
 
 
 def _fit_text(txt, max_w, scale):
@@ -2451,14 +2687,14 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
         s = value_text(roi, val)
         if shape == "line":
             cut = 34 if isinstance(val, (dict, list, tuple)) else 14
-            (tw, th), _ = cv2.getTextSize(s[:cut], cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            tw, th = _text_size(s[:cut], 0.6, 2)
             tx = min(w - tw - 6, max(4, int(pts[:, 0].mean()) + 12))
             ty = max(th + 30, int(pts[:, 1].min()) + th + 6)
             _panel(frame, tx - 5, ty - th - 5, tw + 10, th + 10, 0.7)
             _text(frame, s[:cut], (tx, ty), 0.6, WHITE if readable else TESR_RED, 2)
         elif len(s) <= 4 and bw > 16 and bh > 20:
             scale = max(0.5, min(1.6, bh / 45.0))
-            (tw, th), _ = cv2.getTextSize(s, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+            tw, th = _text_size(s, scale, 2)
             tx, ty = x0 + (bw - tw) // 2, y1 - 4
             _panel(frame, tx - 4, ty - th - 4, tw + 8, th + 8, 0.6)
             _text(frame, s, (tx, ty), scale, WHITE if readable else TESR_RED, 2)
@@ -2531,7 +2767,7 @@ def results_strip(width, rois, results, groups, period=""):
         _text(strip, name, (pad, y), 0.45, GREY)
         _text(strip, text if text else "-", (pad + 78, y + 4), 0.95,
               TESR_GOLD if ok else TESR_RED, 2)
-        (tw, _), _ = cv2.getTextSize(text or "-", cv2.FONT_HERSHEY_SIMPLEX, 0.95, 2)
+        tw = _text_size(text or "-", 0.95, 2)[0]
         _text(strip, "conf %.2f" % conf, (pad + 88 + tw, y + 2), 0.38, GREY)
 
     y += 26
@@ -2561,7 +2797,7 @@ def debug_strip(debugs, width):
         t = img if img.ndim == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         scale = 90.0 / max(1, t.shape[0])
         t = cv2.resize(t, (max(1, int(t.shape[1] * scale)), 90))
-        cv2.putText(t, name[:14], (3, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35, TESR_GOLD, 1, cv2.LINE_AA)
+        _text(t, name[:14], (3, 12), 0.35, TESR_GOLD)
         tiles.append(t)
     if not tiles:
         return None
@@ -2612,6 +2848,7 @@ def run(cfg, args):
     log("camera   : %s (%s)  source=%r" % (cam.get("name"), cam.get("id"), source))
     log("rois     : %s" % ", ".join("%s[%s]" % (r["name"], r["task"]) for r in rois))
     tesseract_setup(rois, getattr(args, "config", None))
+    text_setup(getattr(args, "config", None))
     if groups:
         log("groups   : %s" % ", ".join(
             "%s(%s)" % (n, "+".join(r["name"] for r in ms)) for n, ms in groups))
@@ -2912,8 +3149,7 @@ def calibrate(cfg, args):
             panel = np.vstack([
                 cv2.resize(crop, (480, 160)),
                 cv2.resize(dbg if dbg.ndim == 3 else cv2.cvtColor(dbg, cv2.COLOR_GRAY2BGR), (480, 160))])
-            cv2.putText(panel, "value: %s (%.2f)" % (value, conf), (8, 26),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, TESR_GOLD, 2, cv2.LINE_AA)
+            _text(panel, "value: %s (%.2f)" % (value, conf), (8, 26), 0.6, TESR_GOLD, 2)
             cv2.imshow(win, panel)
             if (cv2.waitKey(30) & 0xFF) in (ord("q"), 27):
                 break
