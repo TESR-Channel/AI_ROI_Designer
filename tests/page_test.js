@@ -118,6 +118,34 @@ whenReady(() => {
         pc("AB1234", { pattern: "([unclosed" }).plate, "AB1234");
   check("a rejection carries a reason", pc("ABCDEF", sq).reason.length > 0, true);
 
+  console.log("\n--- OCR language is picked, not typed (v1.8.2) ---");
+  const nl = G("normLang");
+  check("th is mapped to tha", nl("th"), { ok: true, code: "tha" });
+  check("tha+eng stays as it is", nl("tha+eng"), { ok: true, code: "tha+eng" });
+  check("not a language code is refused", nl("ไทย").ok, false);
+  const pw = G("plateWhitelistFor"), thWL = G("PLATE_WL").tha;
+  check("Thai plate letters: 0-9 + 44 consonants", thWL.length, 54);
+  check("tha gives the Thai set", pw("tha"), thWL);
+  check("eng gives A-Z 0-9", pw("eng"), G("PLATE_CHARS"));
+  const uiWas = G("LANG");
+  win.eval('LANG = "en"');
+  check("a new plate on the English page starts on eng", G("defaultParams")("plate_ocr").lang, "eng");
+  win.eval('LANG = "th"');
+  const roi = { task: "plate_ocr", params: G("defaultParams")("plate_ocr") };
+  win.eval("LANG = " + JSON.stringify(uiWas));
+  check("a new plate on the Thai page starts on tha", [roi.params.lang, roi.params.whitelist], ["tha", thWL]);
+  const s1 = G("langSel")(roi, true);
+  check("the language is a list, not a text box", s1.tagName, "SELECT");
+  check("the list offers eng, tha, tha+eng", [...s1.options].map(o => o.value), ["eng", "tha", "tha+eng"]);
+  s1.value = "eng"; s1.onchange();
+  check("switching to eng swaps a stock whitelist", roi.params.whitelist, G("PLATE_CHARS"));
+  roi.params.whitelist = "0123456789ABC";
+  const s2 = G("langSel")(roi, true); s2.value = "tha"; s2.onchange();
+  check("an edited whitelist is left alone", roi.params.whitelist, "0123456789ABC");
+  const odd = { task: "plate_ocr", params: Object.assign(G("defaultParams")("plate_ocr"), { lang: "th" }) };
+  const s3 = G("langSel")(odd, true);
+  check("an imported value off the list is kept", s3.value, "th");
+
   console.log("\n--- gauge calibration matches the runner ---");
   // gauge_fraction() in tesr_vision_runner.py, same cases, same answers: the
   // sweep direction has to come out of the two reference angles alone.
