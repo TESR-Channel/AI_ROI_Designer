@@ -663,20 +663,19 @@ sudo apt install tesseract-ocr-tha      # Debian / Raspberry Pi OS
 brew install tesseract tesseract-lang   # macOS
 ```
 
-**Windows:** pip ลงให้แค่ `pytesseract` ซึ่งเป็นแค่ตัวเรียกใช้ ตัวโปรแกรม Tesseract ต้องติดตั้งแยก:
-`winget install -e --id UB-Mannheim.TesseractOCR` หรือตัวติดตั้งจาก
-https://github.com/UB-Mannheim/tesseract/wiki (ติ๊ก Thai ใน *Additional language data*)
-ตั้งแต่ v1.8.3 runner หา Tesseract ใน Program Files ได้เอง ไม่ต้องแก้ PATH
-
-**ขาดภาษา ทุกระบบ ไม่ต้องใช้สิทธิ์ admin:**
+**ทุกอย่างอยู่ใน venv (Windows, Linux PC, Raspberry Pi, Jetson):**
 
 ```bash
-python tesr_vision_runner.py --get-lang tha
+pip install tesserocr
 ```
 
-จะดาวน์โหลด `tha.traineddata` มาไว้ในโฟลเดอร์ `tessdata` ข้าง ๆ แล้ว runner ใช้จากตรงนั้นเอง
-เป็นไฟล์ tessdata_fast ตัวเดียวกับที่ `tesseract-ocr-tha` ติดตั้ง (ไบต์ตรงกัน) ผลอ่านจึงเหมือนบน Pi
-ตอนเริ่ม runner จะเช็กโปรแกรมและทุกภาษาที่ config ใช้แค่ครั้งเดียว แล้วบอกวิธีแก้ ไม่พิมพ์คำเตือนเดิมซ้ำทุกเฟรมอีก
+wheel ตัวนี้มี Tesseract อยู่ข้างในแล้ว ไม่ต้องติดตั้งโปรแกรมลงเครื่อง ไม่ต้องแก้ PATH
+ตั้งแต่ v1.8.4 runner ใช้ตัวนี้ก่อน และรันครั้งแรกจะดาวน์โหลดภาษาที่ config ต้องใช้ (`tha.traineddata` 1 MB)
+มาไว้ในโฟลเดอร์ `tessdata` ข้าง ๆ ให้เอง เป็นไฟล์ tessdata_fast ตัวเดียวกับที่ `tesseract-ocr-tha` ติดตั้ง
+เครื่องที่ไม่มีเน็ต: รัน `python tesr_vision_runner.py --get-lang tha` บนเครื่องที่มีเน็ตครั้งเดียว แล้วคัดลอกโฟลเดอร์ `tessdata` ไป
+macOS ยังไม่มี wheel รุ่นใหม่: ใช้ `brew install tesseract tesseract-lang` กับ `pip install pytesseract`
+ถ้าไม่มี tesserocr runner จะใช้โปรแกรม tesseract แทน และหาใน Program Files / Homebrew ได้เอง
+ทั้งสองแบบจะเช็กตอนเริ่มครั้งเดียวแล้วบอกวิธีแก้ ไม่เตือนซ้ำทุกเฟรม
 
 ```json
 "params": {"engine": "tesseract", "lang": "tha",

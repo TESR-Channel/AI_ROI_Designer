@@ -681,21 +681,21 @@ sudo apt install tesseract-ocr-tha      # Debian / Raspberry Pi OS
 brew install tesseract tesseract-lang   # macOS
 ```
 
-**Windows:** pip installs only `pytesseract`, a wrapper - the Tesseract program itself is a
-normal Windows install: `winget install -e --id UB-Mannheim.TesseractOCR`, or the installer from
-https://github.com/UB-Mannheim/tesseract/wiki (tick Thai under *Additional language data*). Since
-v1.8.3 the runner finds it in Program Files by itself, so PATH does not need editing.
-
-**Missing a language, any OS, no admin rights:**
+**Everything inside the venv (Windows, Linux PC, Raspberry Pi, Jetson):**
 
 ```bash
-python tesr_vision_runner.py --get-lang tha
+pip install tesserocr
 ```
 
-downloads `tha.traineddata` into a `tessdata` folder beside you, and the runner uses it from
-there. It is the tessdata_fast file - byte-for-byte what `tesseract-ocr-tha` installs - so the
-reading matches the Pi. At startup the runner now checks the engine and every language the
-config asks for once, and says what to do; it no longer prints the same warning every frame.
+That wheel carries Tesseract itself, so nothing is installed on the system and no PATH is
+edited. Since v1.8.4 the runner uses it first, and on the first run downloads any language the
+config needs (`tha.traineddata`, 1 MB) into a `tessdata` folder beside you - the tessdata_fast
+file, byte-for-byte what `tesseract-ocr-tha` installs. Offline machines: run
+`python tesr_vision_runner.py --get-lang tha` once where there is internet and copy `tessdata`.
+macOS has no current tesserocr wheel: there use `brew install tesseract tesseract-lang` and
+`pip install pytesseract`. Without tesserocr the runner falls back to the tesseract program and
+finds it in Program Files or Homebrew by itself. Either way it checks the engine and every
+language once at startup and says what to do, instead of warning every frame.
 
 ```json
 "params": {"engine": "tesseract", "lang": "tha",
