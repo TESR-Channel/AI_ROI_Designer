@@ -7898,8 +7898,11 @@ async function runOcr(canvas, params){
   const worker = await getTessWorker(params.lang || "eng");
   const opts = {};
   if(params.psm !== undefined && params.psm !== "") opts.tessedit_pageseg_mode = String(params.psm);
-  if(params.whitelist) opts.tessedit_char_whitelist = params.whitelist;
-  if(Object.keys(opts).length) await worker.setParameters(opts);
+  // Always set it, even to "": the worker is shared per language and keeps the
+  // last value it was given, so a plate box's 0-9 + consonants used to stay
+  // on for the next OCR text box and drop every vowel (นนทบุรี -> นนทบร).
+  opts.tessedit_char_whitelist = params.whitelist || "";
+  await worker.setParameters(opts);
   const out = await worker.recognize(canvas);
   return {text: (out.data.text || "").trim(),
           conf: Math.max(0, Math.min(1, (out.data.confidence || 0) / 100))};
