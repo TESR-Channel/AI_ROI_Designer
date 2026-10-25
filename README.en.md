@@ -671,20 +671,27 @@ format-checked; you get the cleaned characters as read.
 ### Plates that are not A–Z 0–9
 
 A Thai plate carries Thai characters, and the same applies to Arabic, Cyrillic or Chinese
-plates. Those need either `easyocr`, or Tesseract with that language pack installed on the
-device, plus those characters added to the allowed list:
+plates. Pick the language from the **Language** list in the Studio - it is a list, not a text
+box, since v1.8.2 (a typed `th` asked Tesseract for a language that does not exist). Picking
+**Thai (tha)** also switches the allowed characters to 0-9 plus the 44 Thai consonants, as long
+as you have not edited that list yourself. On the device Tesseract needs the language pack:
 
 ```bash
 sudo apt install tesseract-ocr-tha      # Debian / Raspberry Pi OS
 ```
 ```json
-"params": {"engine": "tesseract", "lang": "tha+eng",
-           "whitelist": "กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ0123456789"}
+"params": {"engine": "tesseract", "lang": "tha",
+           "whitelist": "0123456789กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ"}
 ```
 
-The browser preview can only try A–Z 0–9, because that is what the bundled Tesseract.js
-language data covers. Tune the box and the format there, then confirm the reading with Python
-on the device.
+Use `tha` on its own rather than `tha+eng`: on the same plate with Tesseract 5, `tha` read 35
+of 36 box positions correctly and `tha+eng` lost the Thai letters on 21 of 36. The runner
+accepts `en` / `th` too and maps them for each engine (Tesseract wants `eng` / `tha`, easyocr
+wants `en` / `th`, and loads Thai only alongside English).
+
+The browser preview reads Thai as well: Tesseract.js fetches the Thai data the first time
+(needs internet). If that download fails, the preview says which language could not be loaded
+and stays usable. It is still a tuning aid - confirm the reading with Python on the device.
 
 ### Try it
 

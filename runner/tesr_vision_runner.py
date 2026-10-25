@@ -37,6 +37,7 @@ import csv
 import json
 import os
 import platform
+import re
 import signal
 import sys
 import time
@@ -58,7 +59,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.1"
+STUDIO_VERSION = "1.8.2"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -713,6 +714,23 @@ def task_digits(crop, roi):
 _OCR = {"engine": None, "obj": None}
 
 
+# Tesseract wants three-letter codes (eng, tha); easyocr wants two (en, th).
+# The Studio writes Tesseract codes, older configs and hand edits may hold
+# either, so map to whichever the engine needs instead of failing on "th".
+_TESS_LANG = {"en": "eng", "th": "tha", "english": "eng", "thai": "tha"}
+_EASY_LANG = {"eng": "en", "tha": "th", "english": "en", "thai": "th"}
+
+
+def ocr_langs(lang, engine):
+    parts = [x for x in re.split(r"[+,\s]+", str(lang or "").lower()) if x]
+    if engine == "easyocr":
+        parts = [_EASY_LANG.get(x, x) for x in parts] or ["en"]
+        if "th" in parts and "en" not in parts:
+            parts.append("en")              # easyocr only loads Thai alongside English
+        return parts
+    return "+".join(_TESS_LANG.get(x, x) for x in parts) or "eng"
+
+
 def task_ocr(crop, roi):
     p = roi.get("params") or {}
     engine = p.get("engine", "tesseract")
@@ -732,7 +750,8 @@ def task_ocr(crop, roi):
         wl = p.get("whitelist", "")
         if wl:
             cfg += " -c tessedit_char_whitelist=%s" % wl
-        txt = pytesseract.image_to_string(gray, lang=p.get("lang", "eng"), config=cfg)
+        txt = pytesseract.image_to_string(gray, lang=ocr_langs(p.get("lang", "eng"), "tesseract"),
+                                          config=cfg)
         return txt.strip(), 0.5, dbg
 
     if engine == "easyocr":
@@ -740,10 +759,11 @@ def task_ocr(crop, roi):
             import easyocr
         except ImportError:
             return "", 0.0, dbg
-        if _OCR["engine"] != "easyocr":
-            langs = (p.get("lang", "en") or "en").split("+")
+        langs = ocr_langs(p.get("lang", "en"), "easyocr")
+        if _OCR["engine"] != "easyocr" or _OCR.get("langs") != langs:
             _OCR["obj"] = easyocr.Reader(langs, gpu=bool(p.get("gpu", False)))
             _OCR["engine"] = "easyocr"
+            _OCR["langs"] = langs
         res = _OCR["obj"].readtext(crop)
         if not res:
             return "", 0.0, dbg

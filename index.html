@@ -522,6 +522,7 @@ import csv
 import json
 import os
 import platform
+import re
 import signal
 import sys
 import time
@@ -543,7 +544,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.1"
+STUDIO_VERSION = "1.8.2"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1198,6 +1199,23 @@ def task_digits(crop, roi):
 _OCR = {"engine": None, "obj": None}
 
 
+# Tesseract wants three-letter codes (eng, tha); easyocr wants two (en, th).
+# The Studio writes Tesseract codes, older configs and hand edits may hold
+# either, so map to whichever the engine needs instead of failing on "th".
+_TESS_LANG = {"en": "eng", "th": "tha", "english": "eng", "thai": "tha"}
+_EASY_LANG = {"eng": "en", "tha": "th", "english": "en", "thai": "th"}
+
+
+def ocr_langs(lang, engine):
+    parts = [x for x in re.split(r"[+,\s]+", str(lang or "").lower()) if x]
+    if engine == "easyocr":
+        parts = [_EASY_LANG.get(x, x) for x in parts] or ["en"]
+        if "th" in parts and "en" not in parts:
+            parts.append("en")              # easyocr only loads Thai alongside English
+        return parts
+    return "+".join(_TESS_LANG.get(x, x) for x in parts) or "eng"
+
+
 def task_ocr(crop, roi):
     p = roi.get("params") or {}
     engine = p.get("engine", "tesseract")
@@ -1217,7 +1235,8 @@ def task_ocr(crop, roi):
         wl = p.get("whitelist", "")
         if wl:
             cfg += " -c tessedit_char_whitelist=%s" % wl
-        txt = pytesseract.image_to_string(gray, lang=p.get("lang", "eng"), config=cfg)
+        txt = pytesseract.image_to_string(gray, lang=ocr_langs(p.get("lang", "eng"), "tesseract"),
+                                          config=cfg)
         return txt.strip(), 0.5, dbg
 
     if engine == "easyocr":
@@ -1225,10 +1244,11 @@ def task_ocr(crop, roi):
             import easyocr
         except ImportError:
             return "", 0.0, dbg
-        if _OCR["engine"] != "easyocr":
-            langs = (p.get("lang", "en") or "en").split("+")
+        langs = ocr_langs(p.get("lang", "en"), "easyocr")
+        if _OCR["engine"] != "easyocr" or _OCR.get("langs") != langs:
             _OCR["obj"] = easyocr.Reader(langs, gpu=bool(p.get("gpu", False)))
             _OCR["engine"] = "easyocr"
+            _OCR["langs"] = langs
         res = _OCR["obj"].readtext(crop)
         if not res:
             return "", 0.0, dbg
@@ -4049,7 +4069,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.8.1";
+const STUDIO_VERSION = "1.8.2";
 
 const I18N = {
 th: {
@@ -4076,6 +4096,10 @@ th: {
   ortErr:"โหลดเอนจิน ONNX ไม่สำเร็จ — เครื่องนี้อาจไม่ได้ต่ออินเทอร์เน็ต",
   ortErrTimeout:"โหลดเอนจิน ONNX ไม่สำเร็จ — หมดเวลารอ ตรวจการเชื่อมต่ออินเทอร์เน็ต",
   ocrErr:"โหลดเอนจิน OCR ไม่สำเร็จ — ต้องต่ออินเทอร์เน็ตครั้งแรก",
+  ocrLangFail:"โหลดภาษา OCR “{lang}” ไม่สำเร็จ — ตรวจอินเทอร์เน็ต แล้วเลือกภาษาจากรายการอีกครั้ง",
+  langEng:"อังกฤษ (eng)", langTha:"ไทย (tha)", langThaEng:"ไทย + อังกฤษ (tha+eng)",
+  langFromFile:"จากไฟล์: ",
+  langBadCode:"ภาษา “{lang}” ไม่ใช่รหัสภาษาของ Tesseract — เลือกจากรายการแทน (ไทย = tha, อังกฤษ = eng)",
   ocrErrTimeout:"โหลดเอนจิน OCR ไม่สำเร็จ — หมดเวลารอ ตรวจการเชื่อมต่ออินเทอร์เน็ต",
 
   /* reference image */
@@ -4265,7 +4289,7 @@ th: {
   pPattern:"รูปแบบป้าย (regex)", pMinChars:"ตัวอักษรน้อยสุด", pMaxChars:"ตัวอักษรมากสุด",
   pPlateH:"ขยายให้สูง (px)", pClahe:"ปรับแสงให้สม่ำเสมอ", pDenoise:"ลด noise",
   plateHint:"<b>รูปแบบป้าย</b> คือตัวกันอ่านผิด ถ้าอ่านได้แล้วไม่ตรงรูปแบบ จะไม่รายงานค่าออกมาเลย ดีกว่าได้เลขทะเบียนผิดไปบันทึกไว้<br>ตัวอย่าง <code>^[A-Z]{2}[0-9]{4}$</code> = ตัวอักษร 2 ตัว ตามด้วยเลข 4 ตัว · เว้นว่างไว้ = ไม่ตรวจรูปแบบ",
-  platePreTh:"ป้ายทะเบียนไทยมีตัวอักษรไทย ต้องใช้ easyocr หรือ Tesseract ที่ลงภาษาไทย (<code>tha</code>) บนเครื่องปลายทาง และใส่ตัวอักษรไทยลงในช่องตัวอักษรที่ยอมให้อ่าน ส่วนในเบราว์เซอร์นี้ทดลองได้เฉพาะ A-Z 0-9",
+  platePreTh:"<b>ป้ายไทย:</b> เลือกภาษา <b>ไทย (tha)</b> — ช่องตัวอักษรที่ยอมให้อ่านจะเปลี่ยนเป็นเลข 0–9 + พยัญชนะไทย 44 ตัวให้เอง (ถ้ายังไม่ได้แก้เอง) · ใช้ <code>tha</code> อย่างเดียวดีกว่า <code>tha+eng</code>: ทดสอบกับ Tesseract 5 บนป้ายเดียวกัน tha อ่านถูก 35 จาก 36 ตำแหน่งกรอบ ส่วน tha+eng ตัวไทยหลุด 21 จาก 36 · บนเครื่องปลายทางต้องลงภาษาไทยให้ Tesseract (<code>sudo apt install tesseract-ocr-tha</code>) · ทดลองในเบราว์เซอร์ได้ แต่ครั้งแรกต้องต่อเน็ตเพื่อโหลดภาษา",
   hint_yolo_detect:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
   hint_yolo_classify:"รันโมเดล .onnx ที่เลือกไว้กับกรอบนี้",
   hint_barcode_qr:"อ่าน QR และบาร์โค้ดในตัว ทำงานออฟไลน์ ทุกเบราว์เซอร์",
@@ -4347,6 +4371,10 @@ en: {
   ortErr:"Could not load the ONNX engine — this machine may be offline",
   ortErrTimeout:"Could not load the ONNX engine — timed out, check the connection",
   ocrErr:"Could not load the OCR engine — needs internet the first time",
+  ocrLangFail:"Could not load the OCR language “{lang}” — check the internet connection, then pick the language from the list again",
+  langEng:"English (eng)", langTha:"Thai (tha)", langThaEng:"Thai + English (tha+eng)",
+  langFromFile:"From the file: ",
+  langBadCode:"“{lang}” is not a Tesseract language code — pick one from the list instead (Thai = tha, English = eng)",
   ocrErrTimeout:"Could not load the OCR engine — timed out, check the connection",
 
   referenceImage:"Reference image", loadImage:"Load an image",
@@ -4528,7 +4556,7 @@ en: {
   pPattern:"Plate format (regex)", pMinChars:"Min characters", pMaxChars:"Max characters",
   pPlateH:"Upscale to height (px)", pClahe:"Even out the light", pDenoise:"Reduce noise",
   plateHint:"<b>Plate format</b> is the safety net. A reading that does not match it is withheld rather than reported, because a wrong plate number in a gate log is worse than no plate number.<br>Example <code>^[A-Z]{2}[0-9]{4}$</code> = two letters then four digits · leave it empty to skip the check",
-  platePreTh:"Plates with non-Latin characters (Thai, Arabic, Cyrillic) need easyocr, or Tesseract with that language pack installed on the target device, plus those characters in the allowed list. This browser preview can only try A-Z 0-9.",
+  platePreTh:"<b>Thai plates:</b> pick <b>Thai (tha)</b> — the allowed characters switch to 0–9 plus the 44 Thai consonants by themselves (unless you have edited them) · <code>tha</code> alone beats <code>tha+eng</code>: on the same plate with Tesseract 5, tha read 35 of 36 box positions correctly, tha+eng lost the Thai letters on 21 of 36 · the device needs Tesseract's Thai pack (<code>sudo apt install tesseract-ocr-tha</code>) · the browser preview can try it too; the first run needs internet to fetch the language",
   hint_yolo_detect:"Runs the selected .onnx model on this ROI",
   hint_yolo_classify:"Runs the selected .onnx model on this ROI",
   hint_barcode_qr:"Built-in QR and barcode reading. Works offline, in every browser.",
@@ -4692,8 +4720,10 @@ function defaultParams(task){
     case "digits_7seg":  return {threshold_mode:"otsu", threshold:128, invert:false, blur:3,
                                  min_fill:0.5, split:"auto", digits:1, decimals:0, unit:"", as_number:true};
     case "ocr_text":     return {engine:"tesseract", lang:"eng", psm:7, whitelist:"", preprocess:true, invert:false};
-    case "plate_ocr":    return {engine:"tesseract", lang:"eng", psm:7,
-                                 whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    // a Thai page starts a plate on Thai: the 44 consonants and 0-9. "tha" alone,
+    // not "tha+eng" - with both, Tesseract dropped the Thai letters far more often
+    case "plate_ocr":    return {engine:"tesseract", lang: LANG === "th" ? "tha" : "eng", psm:7,
+                                 whitelist: LANG === "th" ? PLATE_WL.tha : PLATE_WL.eng,
                                  pattern:"", min_chars:4, max_chars:12,
                                  plate_height:96, clahe:true, denoise:true,
                                  preprocess:true, invert:false};
@@ -5448,6 +5478,45 @@ function sel(obj, key, options){
     updatePreview(); invalidate(); };
   return s;
 }
+/* OCR language - picked, never typed.
+
+   A typed "th" made Tesseract.js fetch th.traineddata, which does not exist:
+   the download failed, the page showed a script error and the preview hung on
+   "Reading ...". The runner fails the same way on the device. So the language
+   comes from a list of codes that exist. A value from an imported config that
+   is not on the list stays selectable (nothing is silently dropped), and a
+   value that is not a language code at all is flagged once. For a plate,
+   picking a language also swaps the allowed characters - but only while they
+   are still one of the stock sets, never over a list somebody edited. */
+const _langWarned = new Set();
+function langSel(r, isPlate){
+  const p = r.params;
+  const s = document.createElement("select");
+  const cur = p.lang == null || p.lang === "" ? "eng" : String(p.lang);
+  const opts = OCR_LANGS.map(c => [c, t(OCR_LANG_LABEL[c])]);
+  if(!OCR_LANGS.includes(cur)){
+    const n = normLang(cur);
+    opts.push([cur, t("langFromFile") + cur + (n.ok && n.code !== cur ? "  (= " + n.code + ")" : "")]);
+    if(!n.ok && !_langWarned.has(cur)){
+      _langWarned.add(cur);
+      toast(t("langBadCode").replace("{lang}", cur));
+    }
+  }
+  opts.forEach(([v, label]) => { const o = document.createElement("option");
+    o.value = v; o.textContent = label; s.appendChild(o); });
+  s.value = cur;
+  s.onchange = () => {
+    const before = p.lang;
+    p.lang = s.value;
+    if(isPlate){
+      const stock = Object.values(PLATE_WL);
+      if(!p.whitelist || stock.includes(p.whitelist)) p.whitelist = plateWhitelistFor(p.lang);
+    }
+    if(before !== p.lang) renderTaskParams(r);
+    updatePreview(); invalidate();
+  };
+  return s;
+}
 function rowOf(nodes){ const d = document.createElement("div"); d.className = "row";
   nodes.forEach(n => d.appendChild(n)); return d; }
 
@@ -5600,14 +5669,14 @@ function renderTaskParams(r){
                field(t("pAsNumber"), sel(p,"as_number",[[true,t("yes")],[false,t("no")]]))]));
   } else if(r.task === "ocr_text"){
     add(rowOf([field(t("pEngine"), sel(p,"engine",[["tesseract","pytesseract"],["easyocr","easyocr"]])),
-               field(t("pLang"), txt(p,"lang"))]));
+               field(t("pLang"), langSel(r, false))]));
     add(rowOf([field("PSM", num(p,"psm",{min:0,max:13,step:1})),
                field(t("pWhitelist"), txt(p,"whitelist"))]));
     add(rowOf([field(t("pPreprocess"), sel(p,"preprocess",[[true,t("enabled")],[false,t("disabled")]])),
                field(t("pInvert"), sel(p,"invert",[[false,t("no")],[true,t("yes")]]))]));
   } else if(r.task === "plate_ocr"){
     add(rowOf([field(t("pEngine"), sel(p,"engine",[["tesseract","pytesseract"],["easyocr","easyocr"]])),
-               field(t("pLang"), txt(p,"lang"))]));
+               field(t("pLang"), langSel(r, true))]));
     add(rowOf([field(t("pWhitelist"), txt(p,"whitelist"))]));
     add(rowOf([field(t("pPattern"), txt(p,"pattern"))]));
     const ph = document.createElement("div");
@@ -7184,6 +7253,8 @@ function measureFromGray(gray, w, h, pts, p, scale, fw, fh){
 }
 
 /* ---------------- OCR engine (Tesseract.js), loaded on demand --------- */
+const OCR_LANGS = ["eng", "tha", "tha+eng"];
+const OCR_LANG_LABEL = {eng:"langEng", tha:"langTha", "tha+eng":"langThaEng"};
 const TESS_URLS = [
   "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
   "https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"
@@ -7212,10 +7283,30 @@ function loadTesseract(){
   return tessReady;
 }
 async function getTessWorker(lang){
+  const n = normLang(lang);
+  if(!n.ok) throw new Error(t("langBadCode").replace("{lang}", lang));
+  lang = n.code;
   const T = await loadTesseract();
   if(tessWorker && tessLang === lang) return tessWorker;
-  if(tessWorker){ try { await tessWorker.terminate(); } catch(e){} tessWorker = null; }
-  tessWorker = await T.createWorker(lang || "eng");
+  if(tessWorker){ try { await tessWorker.terminate(); } catch(e){} tessWorker = null; tessLang = null; }
+  // Without an errorHandler Tesseract.js THROWS a failed language download from
+  // inside its message handler: an uncaught error (the red bar) and, worse, a
+  // promise that never settles, so the preview sat on "Reading ..." for good.
+  let fail;
+  const failed = new Promise((_, rej) => { fail = rej; });
+  let timer;
+  const timeout = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error("timeout")), 90000); });
+  const pending = T.createWorker(lang, 1, {
+    errorHandler: e => fail(new Error(String((e && e.message) || e))) });
+  try{
+    tessWorker = await Promise.race([pending, failed, timeout]);
+  }catch(e){
+    // if it does come up later, do not leave a worker running in the background
+    pending.then(w => { try { w.terminate(); } catch(_){} }, () => {});
+    tessWorker = null; tessLang = null;
+    throw new Error(t("ocrLangFail").replace("{lang}", lang));
+  }finally{ clearTimeout(timer); }
   tessLang = lang;
   return tessWorker;
 }
@@ -7227,6 +7318,25 @@ async function getTessWorker(lang){
    tuning aid. The number that counts is the one the Python runner reports on
    the device. */
 const PLATE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+// the 44 Thai consonants, in dictionary order - the letters a Thai plate uses
+const THAI_CONSONANTS = "กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ";
+const PLATE_WL = {eng: PLATE_CHARS,
+                  tha: "0123456789" + THAI_CONSONANTS,
+                  "tha+eng": PLATE_CHARS + THAI_CONSONANTS};
+function plateWhitelistFor(lang){
+  const n = normLang(lang);
+  return PLATE_WL[n.code] || PLATE_CHARS;
+}
+/* Tesseract language codes are three letters (eng, tha, chi_sim ...). easyocr
+   and people type two (en, th); those are mapped, anything else is refused
+   before a download is attempted. */
+const LANG_ALIAS = {en:"eng", th:"tha", english:"eng", thai:"tha"};
+function normLang(lang){
+  const parts = String(lang || "eng").toLowerCase().split(/[+,\s]+/).filter(Boolean)
+    .map(x => LANG_ALIAS[x] || x);
+  const ok = parts.length > 0 && parts.every(x => /^[a-z]{3}(_[a-z]+)?$/.test(x));
+  return {ok, code: parts.join("+")};
+}
 const PLATE_SWAPS = {O:"0", D:"0", Q:"0", I:"1", L:"1", Z:"2", S:"5", B:"8", G:"6",
                      "0":"O", "1":"I", "2":"Z", "5":"S", "8":"B", "6":"G"};
 
@@ -7309,7 +7419,7 @@ function plateClean(text, p){
 }
 
 async function runOcr(canvas, params){
-  const worker = await getTessWorker((params.lang || "eng").split("+")[0]);
+  const worker = await getTessWorker(params.lang || "eng");
   const opts = {};
   if(params.psm !== undefined && params.psm !== "") opts.tessedit_pageseg_mode = String(params.psm);
   if(params.whitelist) opts.tessedit_char_whitelist = params.whitelist;
