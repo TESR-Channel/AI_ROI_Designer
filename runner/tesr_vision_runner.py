@@ -60,7 +60,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.8"
+STUDIO_VERSION = "1.8.9"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -282,7 +282,30 @@ DEFAULT_RUNTIME = {
 }
 
 
+_HOME = {"config_dir": None}      # the folder the --config file is in
+
+
+def find_model(path):
+    """A relative model path is looked for in the folder you run the command
+    in first (as always), then next to the config file, then next to this
+    script - so an exported project kept in its own folder (from_web/) still
+    finds its .onnx when you run from the chapter folder."""
+    if not path or os.path.isabs(path) or os.path.isfile(path):
+        return path
+    for base in (_HOME["config_dir"], os.path.dirname(os.path.abspath(__file__))):
+        if base:
+            cand = os.path.join(base, path)
+            if os.path.isfile(cand):
+                try:
+                    rel = os.path.relpath(cand)      # from_web/model.onnx reads better
+                except ValueError:                   # another drive on Windows
+                    return cand
+                return cand if rel.startswith("..") else rel
+    return path
+
+
 def load_config(path):
+    _HOME["config_dir"] = os.path.dirname(os.path.abspath(path))
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     if cfg.get("schema") != SCHEMA:
@@ -1143,6 +1166,7 @@ def _nms(boxes, scores, classes, iou_thr):
 def get_onnx(path):
     """Load an ONNX model with onnxruntime only. Much lighter than Ultralytics,
     which matters on a Raspberry Pi."""
+    path = find_model(path)
     if path in _ORT:
         return _ORT[path]
     try:
@@ -1155,7 +1179,7 @@ def get_onnx(path):
         # a relative path is opened from the current directory - say which one,
         # because "not found" next to a file you can see is the usual mistake
         log("model file not found: %s (relative paths are opened from the folder "
-            "you run the command in: %s)" % (path, os.getcwd()), "WARN")
+            "you run the command in: %s, then next to the config)" % (path, os.getcwd()), "WARN")
         _ORT[path] = None
         return None
     providers = ["CPUExecutionProvider"]
@@ -1231,6 +1255,7 @@ def onnx_classify(crop, roi):
 
 def get_yolo(path):
     """Load a model once and keep it in memory (never load inside the loop)."""
+    path = find_model(path)
     if path in _MODELS:
         return _MODELS[path]
     try:
@@ -1241,7 +1266,7 @@ def get_yolo(path):
         return None
     if not os.path.isfile(path) and not path.endswith(".pt"):
         log("model file not found: %s (relative paths are opened from the folder "
-            "you run the command in: %s)" % (path, os.getcwd()), "WARN")
+            "you run the command in: %s, then next to the config)" % (path, os.getcwd()), "WARN")
     log("loading model: %s" % path)
     _MODELS[path] = YOLO(path)
     return _MODELS[path]

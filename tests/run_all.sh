@@ -43,6 +43,8 @@ run "counter loop end to end" python3 -I tests/counter_loop_test.py
 # the needle gauge, against dials drawn by the test itself
 run "needle gauge" python3 -I tests/gauge_test.py
 
+run "model next to the config" python3 -I tests/model_path_test.py
+
 # the licence plate preset, including the readings it must refuse
 if command -v tesseract >/dev/null 2>&1; then
   run "licence plate preset" python3 -I tests/plate_test.py
