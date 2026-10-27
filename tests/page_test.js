@@ -271,6 +271,86 @@ whenReady(() => {
   check("exported engine carries the period clock",
         win.document.getElementById("lineSrc").textContent.includes("class PeriodClock"), true);
 
+  importTests().then(finish, e => { fail.push("import tests threw: " + e.message); finish(); });
+});
+
+/* Export, then Import, must give back a project that runs and edits as it was:
+   models attached, each camera's detector attached, nothing to add again. */
+async function importTests() {
+  console.log("\n--- import gives the project back, models attached ---");
+  const enc = new win.TextEncoder();
+  const models = G("models"), state = G("state");
+  const fakeOnnx = n => new win.Uint8Array([8, 7, 18, 4, 116, 101, 115, 116, n]);   // not a real graph; only bytes
+  const cfg = {
+    schema: "tesr.roi.v1", studio_version: "1.8.6", project: "Line test",
+    cameras: [{id: "cam1", name: "Camera 1", source: "0", width: 640, height: 480,
+      detector: {path: "model.onnx", class_names: ["Red_Apple", "Green_Apple", "Orange", "Lemon"],
+                 imgsz: 224, conf: 0.25, iou: 0.45},
+      rois: [{id: "r1", name: "line_1", task: "line_count", shape: "line", points: [[0, 0.48], [1, 0.48]],
+              params: {classes: ["Orange"], invert: true}},
+             {id: "r2", name: "slot", task: "yolo_detect", rect: {x: 0.1, y: 0.1, w: 0.2, h: 0.2, angle: 0},
+              model: {path: "model.onnx", imgsz: 224, class_names: ["Red_Apple", "Green_Apple", "Orange", "Lemon"]},
+              params: {expect: "Orange"}}]}]};
+  const reset = () => { models.splice(0, models.length); };
+  const cfgBytes = enc.encode(JSON.stringify(cfg));
+  const missing = () => win.document.getElementById("dlgMissing").open === true;
+  const closeMissing = () => { win.document.getElementById("dlgMissing").open = false; };
+
+  // 1. the unzipped folder, picked together: config + model, no manifest
+  reset(); closeMissing();
+  await G("openProjectFiles")(new win.Map([["line_test_config.json", cfgBytes], ["model.onnx", fakeOnnx(1)]]));
+  const c1 = state.cameras[0];
+  check("config + .onnx together: one model kept", models.map(m => m.deploy), ["model.onnx"]);
+  check("... the camera's detector is attached", !!(c1.detector.id && c1.detector.id === models[0].id), true);
+  check("... the model region is attached", c1.rois[1].model.id === models[0].id, true);
+  check("... its classes come from the config", models[0].names, ["Red_Apple", "Green_Apple", "Orange", "Lemon"]);
+  check("... imgsz from the config when the file has none", models[0].size, 224);
+  check("... no 'missing model' dialog", missing(), false);
+  check("... the line keeps its class filter", c1.rois[0].params.classes, ["Orange"]);
+
+  // 2. a config.json alone, the model already in this browser: attached by file name
+  await G("openProjectFiles")(new win.Map([["line_test_config.json", cfgBytes]]));
+  const c2 = state.cameras[0];
+  check("config alone, model already here: detector attached", c2.detector.id === models[0].id, true);
+  check("... region attached", c2.rois[1].model.id === models[0].id, true);
+  check("... still no dialog", missing(), false);
+  check("... and Export would carry the model", G("modelsInUse")().map(m => m.deploy), ["model.onnx"]);
+
+  // 3. a config alone, the model nowhere: ask for it by name, then attach it
+  reset();
+  await G("openProjectFiles")(new win.Map([["line_test_config.json", cfgBytes]]));
+  check("config alone, no model: the dialog asks for it", missing(), true);
+  check("... by its file name", win.document.getElementById("missList").textContent, "model.onnx");
+  closeMissing();
+  await G("attachModels")(new win.Map([["model.onnx", fakeOnnx(2)]]), ["model.onnx"]);
+  check("... picking it attaches the detector", state.cameras[0].detector.id === models[0].id, true);
+  check("... and the region", state.cameras[0].rois[1].model.id === models[0].id, true);
+
+  // 4. the exported zip, read back: the round trip the button promises
+  const built = G("buildConfig")(true);
+  const manifest = {schema: "tesr.roi.project.v1", config: "line_test_config.json",
+    models: G("modelsInUse")().map(m => ({id: m.id, name: m.name, type: m.type, size: m.size, conf: m.conf,
+      iou: m.iou, names: m.names, deploy: m.deploy, file: m.deploy}))};
+  check("export strips the browser id from the detector", "id" in built.cameras[0].detector, false);
+  const zip = G("zipWrite")([{name: "line_test_config.json", data: enc.encode(JSON.stringify(built))},
+                             {name: "model.onnx", data: models[0].bytes},
+                             {name: "project.json", data: enc.encode(JSON.stringify(manifest))}]);
+  const zbytes = await new Promise((res, rej) => {        // jsdom's Blob has no arrayBuffer()
+    const fr = new win.FileReader();
+    fr.onload = () => res(new win.Uint8Array(fr.result)); fr.onerror = rej;
+    fr.readAsArrayBuffer(zip);
+  });
+  reset();
+  await G("openProjectFiles")(await G("zipRead")(zbytes));
+  check("exported zip back in: one model", models.map(m => m.deploy), ["model.onnx"]);
+  check("... detector attached", state.cameras[0].detector.id === models[0].id, true);
+  check("... region attached", state.cameras[0].rois[1].model.id === models[0].id, true);
+  check("... line and its filter intact", [state.cameras[0].rois[0].task, state.cameras[0].rois[0].params.classes],
+        ["line_count", ["Orange"]]);
+  check("... no dialog", missing(), false);
+}
+
+function finish() {
   console.log();
   if (fail.length) {
     console.log(`${fail.length} FAILED`);
@@ -281,4 +361,4 @@ whenReady(() => {
   console.log("all page checks passed");
   dom.window.close();          // the render loop would otherwise keep node alive
   process.exit(0);
-});
+}

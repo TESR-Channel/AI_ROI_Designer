@@ -59,7 +59,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.5"
+STUDIO_VERSION = "1.8.6"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -3224,6 +3224,9 @@ def main():
                     help="pick a camera out of the config by id or name (default: the first)")
     ap.add_argument("--source", help="where it comes from: an index for usb/csi (0, 1, 2), "
                                      "a URL for ip, a path for file")
+    ap.add_argument("--broker", metavar="HOST[:PORT]",
+                    help="send every reading over MQTT to this broker - the computer running "
+                         "Node-RED - whatever the config says (e.g. --broker 192.168.1.50)")
     ap.add_argument("--image", help="run on a single image file")
     ap.add_argument("--once", action="store_true",
                     help="read until every ROI has settled (stable_frames), print one JSON, exit")
@@ -3261,6 +3264,14 @@ def main():
         return get_lang(args.get_lang)
 
     cfg = load_config(args.config)
+    if args.broker:
+        # the same switch as fruit_sorter.py: one flag, MQTT on, to that computer
+        host, _, port = args.broker.strip().partition(":")
+        mq = cfg["runtime"]["mqtt"]
+        mq["enabled"] = True
+        mq["host"] = host or "localhost"
+        if port:
+            mq["port"] = int(port)
 
     if args.list:
         print("project: %s" % cfg.get("project"))
