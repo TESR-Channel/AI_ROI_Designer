@@ -796,7 +796,11 @@ def find_model(path):
         if base:
             cand = os.path.join(base, path)
             if os.path.isfile(cand):
-                return cand
+                try:
+                    rel = os.path.relpath(cand)      # from_web/model.onnx reads better
+                except ValueError:                   # another drive on Windows
+                    return cand
+                return cand if rel.startswith("..") else rel
     return path
 
 
