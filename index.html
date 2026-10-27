@@ -200,7 +200,8 @@
   <button id="btnRuntime" data-i18n="runtimeSettings"></button>
   <button id="btnJson" data-i18n="viewJson"></button>
   <button id="btnPy" class="primary" data-i18n="exportBtn"></button>
-  <input type="file" id="fileImport" accept=".json,.zip,application/json,application/zip" hidden>
+  <input type="file" id="fileImport" accept=".json,.zip,.onnx,application/json,application/zip" multiple hidden>
+  <input type="file" id="fileMissing" accept=".onnx" multiple hidden>
 </header>
 
 <main>
@@ -391,6 +392,20 @@
   </aside>
 </main>
 
+<dialog id="dlgMissing">
+  <div class="dhead">
+    <h2 data-i18n="missTitle"></h2>
+    <div style="flex:1"></div>
+    <button id="missClose" class="ghost" data-i18n="close"></button>
+  </div>
+  <div style="padding:14px 18px;line-height:1.6">
+    <p data-i18n="missBody"></p>
+    <p id="missList" style="font-family:ui-monospace,Consolas,monospace;color:#F30006;font-weight:700;margin:8px 0"></p>
+    <p data-i18n="missHint" style="color:#8a8f98;font-size:12px"></p>
+    <button id="missPick" class="primary" data-i18n="missPick" style="margin-top:10px"></button>
+  </div>
+</dialog>
+
 <dialog id="dlg">
   <div class="dhead">
     <h2 id="dlgTitle">Config</h2>
@@ -544,7 +559,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.5"
+STUDIO_VERSION = "1.8.6"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -3709,6 +3724,9 @@ def main():
                     help="pick a camera out of the config by id or name (default: the first)")
     ap.add_argument("--source", help="where it comes from: an index for usb/csi (0, 1, 2), "
                                      "a URL for ip, a path for file")
+    ap.add_argument("--broker", metavar="HOST[:PORT]",
+                    help="send every reading over MQTT to this broker - the computer running "
+                         "Node-RED - whatever the config says (e.g. --broker 192.168.1.50)")
     ap.add_argument("--image", help="run on a single image file")
     ap.add_argument("--once", action="store_true",
                     help="read until every ROI has settled (stable_frames), print one JSON, exit")
@@ -3746,6 +3764,14 @@ def main():
         return get_lang(args.get_lang)
 
     cfg = load_config(args.config)
+    if args.broker:
+        # the same switch as fruit_sorter.py: one flag, MQTT on, to that computer
+        host, _, port = args.broker.strip().partition(":")
+        mq = cfg["runtime"]["mqtt"]
+        mq["enabled"] = True
+        mq["host"] = host or "localhost"
+        if port:
+            mq["port"] = int(port)
 
     if args.list:
         print("project: %s" % cfg.get("project"))
@@ -4530,7 +4556,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.8.5";
+const STUDIO_VERSION = "1.8.6";
 
 const I18N = {
 th: {
@@ -4538,6 +4564,11 @@ th: {
   projectName:"ชื่อโปรเจกต์", importConfig:"นำเข้า config", runtimeSettings:"ตั้งค่า Runtime",
   projectSaved:"บันทึกโปรเจกต์แล้ว — ไฟล์เดียวจบ ทั้งแก้ต่อและรันได้",
   projectOpened:"เปิดโปรเจกต์แล้ว โมเดลติดกลับมาให้เรียบร้อย",
+  missTitle:"ขาดไฟล์โมเดล",
+  missBody:"config นี้ใช้โมเดลที่เบราว์เซอร์นี้ยังไม่มี — เลือกไฟล์ตามชื่อนี้ แล้วทุกกรอบและทุกกล้องจะผูกกลับเองทันที:",
+  missHint:"ครั้งหน้าเลือก .zip ที่ Export ไว้ หรือเลือก config + project.json + .onnx พร้อมกัน (กด Ctrl ค้าง) ก็ไม่ต้องมาหน้านี้",
+  missPick:"เลือกไฟล์โมเดล…",
+  noConfigInFiles:"ไม่พบ config ในไฟล์ที่เลือก",
   dupDeploy:"มีโมเดลมากกว่าหนึ่งตัวใช้ชื่อไฟล์เดียวกัน จะชนกันทั้งในโฟลเดอร์และบนเครื่องจริง — แก้ชื่อก่อน: ",
   viewJson:"ดู JSON", exportBtn:"ส่งออก config + Python",
 
@@ -4817,6 +4848,11 @@ en: {
   projectName:"Project name", importConfig:"Import config", runtimeSettings:"Runtime settings",
   projectSaved:"Project saved — one file to carry on from, and to run",
   projectOpened:"Project opened, models attached",
+  missTitle:"Model file missing",
+  missBody:"This config uses models this browser does not have yet - pick the files with these names and every region and camera is attached again at once:",
+  missHint:"Next time pick the exported .zip, or the config + project.json + .onnx together (hold Ctrl), and this page never appears",
+  missPick:"Pick model file(s)…",
+  noConfigInFiles:"No config in the files you picked",
   dupDeploy:"Two models share one deployed filename; they would collide in the folder and on the device. Rename one first: ",
   viewJson:"View JSON", exportBtn:"Export config + Python",
 
@@ -6435,7 +6471,12 @@ P("verTag").textContent = STUDIO_VERSION;
 P("fileImage").onchange = e => { if(e.target.files[0]) readFile(e.target.files[0]); e.target.value = ""; };
 wrap.addEventListener("dragover", e => e.preventDefault());
 wrap.addEventListener("drop", e => { e.preventDefault();
-  const f = [...e.dataTransfer.files].find(f => f.type.startsWith("image/")); if(f) readFile(f); });
+  const list = [...e.dataTransfer.files];
+  if(list.some(f => /\.(zip|json|onnx)$/i.test(f.name))){
+    importList(list).catch(err => toast(t("badFile") + err.message));
+    return;
+  }
+  const f = list.find(f => f.type.startsWith("image/")); if(f) readFile(f); });
 window.addEventListener("paste", e => {
   const it = [...(e.clipboardData ? e.clipboardData.items : [])].find(i => i.type.startsWith("image/"));
   if(it) readFile(it.getAsFile());
@@ -9347,8 +9388,11 @@ function projectReadme(cfgName, mdls){
     "",
     "TO CARRY ON EDITING",
     "  Open " + location.href.split("#")[0],
-    "  press Import config, and choose this .zip. The regions, the reference",
-    "  image and the models all come back, already attached.",
+    "  press Import config, and choose this .zip - or, once unzipped, pick",
+    "  " + cfgName + ", project.json and the .onnx file(s) together",
+    "  (hold Ctrl), or drop them on the picture. The regions, the reference",
+    "  image, the models and each camera's detector all come back attached:",
+    "  nothing to add again, edit and export as before.",
     "",
     "TO RUN IT",
     "  Unzip the whole thing into one folder, cd into it and run from there.",
@@ -9362,6 +9406,8 @@ function projectReadme(cfgName, mdls){
     "    python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 0 --test",
     "    python tesr_vision_runner.py --config " + cfgName + " --image photo.jpg --once",
     "    python tesr_vision_runner.py --config " + cfgName + " --headless",
+    "    python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 2 --broker 192.168.1.50",
+    "      (--broker = send every reading over MQTT to that computer, e.g. Node-RED)",
     "",
     "  python3 rather than python on a Raspberry Pi or a Jetson.",
     "  A ribbon camera is --camera csi, a network camera is",
@@ -9424,77 +9470,153 @@ async function exportAll(){
   P("dlg").showModal();
 }
 
-async function openProject(file){
-  const files = await zipRead(new Uint8Array(await file.arrayBuffer()));
+/* ------------------------------ import ------------------------------
+   Export, then Import, must give back the job exactly as it was - every
+   region, every model, every camera's detector - ready to run and ready to
+   edit. Three ways in, one path through:
+     - the exported .zip
+     - the unzipped folder: pick the config, project.json and the .onnx
+       files together (Ctrl/Shift-click), or drop them on the picture
+     - a config.json on its own: its models are found among the ones this
+       browser already keeps, by file name; any still missing are asked for
+       once, by name, and attached the moment they are picked
+   A config names a model by its DEPLOYED file name (the browser's own id is
+   stripped on export because it means nothing on a device), so the file
+   name is the join everywhere. */
+const baseName = p => String(p || "").split(/[\\/]/).pop();
+
+async function filesToMap(list){
+  const files = new Map();
+  for(const f of list){
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    if(/\.zip$/i.test(f.name)) (await zipRead(bytes)).forEach((d, n) => files.set(n, d));
+    else files.set(f.name, bytes);
+  }
+  return files;
+}
+
+/* every place a config names a model: camera detectors and model ROIs */
+function modelRefs(){
+  const refs = [];
+  state.cameras.forEach(c => {
+    if(c.detector && c.detector.path) refs.push({holder: c.detector, kind: "detect"});
+    (c.rois || []).forEach(r => {
+      if(r.model && r.model.path)
+        refs.push({holder: r.model, kind: r.task === "yolo_classify" ? "classify" : "detect"});
+    });
+  });
+  return refs;
+}
+
+/* a model record from a bare .onnx: what the file says, then what the config says */
+function modelFromBytes(name, data, ref){
+  const meta = onnxMeta(data);
+  let size = 0;
+  try{ const a = JSON.parse(meta.imgsz || "null"); size = Array.isArray(a) ? +a[0] : +(a || 0); }
+  catch(e){ size = +meta.imgsz || 0; }
+  const h = ref ? ref.holder : {};
+  return {id: uid("m"), name: baseName(name).replace(/\.onnx$/i, ""),
+          type: meta.task === "classify" ? "classify" : (ref ? ref.kind : "detect"),
+          size: size || +h.imgsz || 640,
+          conf: hasNum(h.conf) ? +h.conf : 0.25, iou: hasNum(h.iou) ? +h.iou : 0.45,
+          names: (h.class_names && h.class_names.length) ? h.class_names.slice() : (onnxClasses(meta) || []),
+          deploy: baseName(name), bytes: data};
+}
+
+function addModelRec(rec){
+  const i = models.findIndex(x => x.id === rec.id || x.deploy === rec.deploy);
+  if(i >= 0){ rec.id = models[i].id; models[i] = rec; } else models.push(rec);
+  dbPut(rec);
+  return rec;
+}
+
+/* point every reference at a model by file name; return the names still missing */
+function linkModels(prefer){
+  const pool = (prefer || []).concat(models);
+  const missing = new Set();
+  let linked = 0;
+  modelRefs().forEach(ref => {
+    const want = baseName(ref.holder.path);
+    const m = pool.find(x => baseName(x.deploy) === want);
+    if(m){ ref.holder.id = m.id; linked++; }
+    else { delete ref.holder.id; missing.add(want); }
+  });
+  return {linked, missing: [...missing]};
+}
+
+async function openProjectFiles(files){
   const dec = new TextDecoder();
-
+  const keys = [...files.keys()];
   let manifest = null;
-  if(files.has("project.json")){
-    try{ manifest = JSON.parse(dec.decode(files.get("project.json"))); }catch(e){ manifest = null; }
-  }
-  // the config is whatever the manifest names, or the only *_config.json there
-  let cfgRaw = manifest && files.get(manifest.config);
-  if(!cfgRaw){
-    const key = [...files.keys()].find(k => /(^|\/)[^\/]*config\.json$/i.test(k) && k !== "project.json");
-    if(key) cfgRaw = files.get(key);
-  }
-  if(!cfgRaw) throw new Error("no config.json inside that file");
-  const cfg = JSON.parse(dec.decode(cfgRaw));
+  const mk = keys.find(k => baseName(k) === "project.json");
+  if(mk){ try{ manifest = JSON.parse(dec.decode(files.get(mk))); }catch(e){ manifest = null; } }
 
-  const restored = [];
-  if(manifest && manifest.models && manifest.models.length){
-    manifest.models.forEach(m => {
-      const data = files.get(m.file) || files.get(m.deploy);
-      if(!data) return;
-      const rec = {id: m.id || uid("m"), name: m.name || "model",
-                   type: m.type || "detect", size: m.size || 640,
-                   conf: m.conf != null ? m.conf : 0.25,
-                   iou: m.iou != null ? m.iou : 0.45,
-                   names: m.names || [], deploy: m.deploy || m.file, bytes: data};
-      const i = models.findIndex(x => x.id === rec.id);
-      if(i >= 0) models[i] = rec; else models.push(rec);
-      dbPut(rec); restored.push(rec);
-    });
-  } else {
-    // No manifest - a zip somebody assembled by hand. Every .onnx in it can
-    // still describe itself, which is the whole point of reading the metadata.
-    files.forEach((data, nm) => {
-      if(!/\.onnx$/i.test(nm)) return;
-      const meta = onnxMeta(data);
-      let size = 640;
-      try{
-        const a = JSON.parse(meta.imgsz || "null");
-        size = Array.isArray(a) ? +a[0] : (+meta.imgsz || 640);
-      }catch(e){ size = +meta.imgsz || 640; }
-      const rec = {id: uid("m"), name: nm.split("/").pop().replace(/\.onnx$/i, ""),
-                   type: meta.task === "classify" ? "classify" : "detect",
-                   size: size || 640, conf: 0.25, iou: 0.45,
-                   names: onnxClasses(meta) || [], deploy: nm.split("/").pop(), bytes: data};
-      models.push(rec); dbPut(rec); restored.push(rec);
-    });
+  // the config: the one the manifest names, else *config.json, else any tesr.roi config
+  let cfg = null;
+  const parse = k => { try{ return JSON.parse(dec.decode(files.get(k))); }catch(e){ return null; } };
+  const byName = manifest && keys.find(k => baseName(k) === baseName(manifest.config));
+  if(byName) cfg = parse(byName);
+  if(!cfg){ const k = keys.find(k => /config\.json$/i.test(k) && baseName(k) !== "project.json"); if(k) cfg = parse(k); }
+  if(!cfg){
+    for(const k of keys.filter(k => /\.json$/i.test(k) && baseName(k) !== "project.json")){
+      const c = parse(k); if(c && (c.cameras || c.schema === "tesr.roi.v1")){ cfg = c; break; }
+    }
+  }
+  const onnx = keys.filter(k => /\.onnx$/i.test(k));
+  if(!cfg){
+    if(onnx.length){ await attachModels(files, onnx, null); return; }   // only models: add them
+    throw new Error(t("noConfigInFiles"));
   }
 
   loadConfig(cfg);
-
-  // Put each region back on its model. The config records the DEPLOYED
-  // filename and never the browser's handle, so that name is the join.
-  let linked = 0;
-  const find = p => restored.find(x => x.deploy === p) || models.find(x => x.deploy === p);
-  state.cameras.forEach(c => {
-    (c.rois || []).forEach(r => {
-      if(!r.model || !r.model.path) return;
-      const m = find(r.model.path);
-      if(m){ r.model.id = m.id; linked++; }
-    });
-    if(c.detector && c.detector.path){
-      const m = find(c.detector.path);
-      if(m) c.detector.id = m.id;
-    }
+  const refs = modelRefs();
+  const restored = [];
+  const described = new Set();
+  // the manifest knows each model's settings as they were in the Studio
+  ((manifest && manifest.models) || []).forEach(m => {
+    const k = keys.find(k => baseName(k) === baseName(m.file || m.deploy));
+    if(!k) return;
+    described.add(k);
+    restored.push(addModelRec({id: m.id || uid("m"), name: m.name || "model", type: m.type || "detect",
+      size: m.size || 640, conf: m.conf != null ? m.conf : 0.25, iou: m.iou != null ? m.iou : 0.45,
+      names: m.names || [], deploy: m.deploy || baseName(m.file), bytes: files.get(k)}));
   });
+  // any other .onnx picked alongside: describe it from itself and from the config
+  onnx.filter(k => !described.has(k)).forEach(k => {
+    const ref = refs.find(r => baseName(r.holder.path) === baseName(k));
+    restored.push(addModelRec(modelFromBytes(k, files.get(k), ref)));
+  });
+  finishImport(restored);
+}
 
+function finishImport(restored){
+  const {linked, missing} = linkModels(restored);
   renderModels(); renderAll(); syncProps();
   restored.forEach(m => { getSession(m).catch(() => {}); });   // warm up Test now
-  toast(t("projectOpened") + " · " + restored.length + " model, " + linked + " ROI");
+  if(missing.length){
+    P("missList").textContent = missing.join("   ");
+    P("dlgMissing").showModal();
+  } else {
+    toast(t("projectOpened") + " · " + restored.length + " model, " + linked + " ROI/detector");
+  }
+}
+
+async function attachModels(files, keys, _){
+  const refs = modelRefs();
+  const added = keys.map(k => addModelRec(modelFromBytes(k, files.get(k),
+                  refs.find(r => baseName(r.holder.path) === baseName(k)))));
+  finishImport(added);
+}
+
+/* kept for anything that still calls it with one zip */
+async function openProject(file){ return openProjectFiles(await filesToMap([file])); }
+
+async function importList(list){
+  const all = [...list];
+  const usable = all.filter(f => /\.(zip|json|onnx)$/i.test(f.name));
+  if(!usable.length) return false;
+  await openProjectFiles(await filesToMap(usable));
+  return true;
 }
 
 function needsLineEngine(){
@@ -9525,7 +9647,8 @@ zipName + "  (" + mb + " MB)  —  แตกไฟล์ลงโฟลเดอ
 "  tesr_vision_runner.py        โปรแกรมอ่านค่า ใช้ได้ทั้ง Windows / macOS / Linux / Raspberry Pi / Jetson",
 (needsLineEngine() ? "  tesr_line_engine.py          เอนจินเส้นและพื้นที่ ต้องวางไว้โฟลเดอร์เดียวกัน" : ""),
 modelLines.join("\n"),
-"  project.json                 ไฟล์โปรเจกต์ ลากกลับเข้าปุ่ม นำเข้า config ได้ ไม่ต้องวาดใหม่",
+"  project.json                 ไฟล์โปรเจกต์ — กด นำเข้า config เลือก zip นี้ (หรือเลือก config + project.json + .onnx พร้อมกัน)",
+"                               กรอบ โมเดล และโมเดลของกล้องกลับมาครบ แก้ต่อได้เลย ไม่ต้องเพิ่มโมเดลใหม่",
 "",
 "กล้องในไฟล์นี้",
 cams,
@@ -9559,6 +9682,7 @@ cams,
 "   --camera csi                    กล้องสายแพ (Raspberry Pi / Jetson)",
 "   --camera ip --source rtsp://user:pass@192.168.1.50:554/stream1",
 "   " + pad("--camera-id " + camId2) + "เลือกกล้องอื่นในไฟล์เดียวกัน (ตาม id หรือชื่อ ดูรายการด้านบน)",
+"   --broker 192.168.1.50           ส่งทุกค่าไป MQTT ที่เครื่องนั้น (เช่น Node-RED) ไม่ต้องแก้ไฟล์",
 "",
 (mdls.length ? "ไฟล์โมเดล .onnx อยู่ใน zip นี้แล้ว (ดูรายการด้านบน) ไม่ต้องคัดลอกเอง\n" +
  "ชื่อโมเดลใน config เป็น path แบบ relative ซึ่ง runner จะเปิดจากโฟลเดอร์ที่คุณสั่งรันคำสั่ง\n" +
@@ -9582,7 +9706,8 @@ zipName + "  (" + mb + " MB)  —  unzip it into one folder and run from THAT fo
 "  tesr_vision_runner.py        the reader; runs on Windows / macOS / Linux / Raspberry Pi / Jetson",
 (needsLineEngine() ? "  tesr_line_engine.py          the line and zone engine; keep it in the same folder" : ""),
 modelLines.join("\n"),
-"  project.json                 the project itself - hand this zip back to Import config and carry on",
+"  project.json                 the project itself - Import config with this zip (or config + project.json + .onnx",
+"                               together) and every region, model and camera detector is back, ready to edit",
 "",
 "Cameras in this config",
 cams,
@@ -9616,6 +9741,7 @@ cams,
 "   --camera csi                    ribbon camera (Raspberry Pi / Jetson)",
 "   --camera ip --source rtsp://user:pass@192.168.1.50:554/stream1",
 "   " + pad("--camera-id " + camId2) + "another camera from the same config (by id or name, listed above)",
+"   --broker 192.168.1.50           send every reading over MQTT to that computer (e.g. Node-RED)",
 "",
 (mdls.length ? "The .onnx model is already inside this zip (listed above) - nothing to copy.\n" +
  "Its path in the config is relative, and the runner opens it from the folder you\n" +
@@ -9637,21 +9763,18 @@ cams,
 /* import */
 P("btnImport").onclick = () => P("fileImport").click();
 P("fileImport").onchange = e => {
-  const f = e.target.files[0]; if(!f) return;
-  e.target.value = "";
-  // one button for both: a config on its own, or a whole project
-  if(/\.zip$/i.test(f.name)){
-    openProject(f).catch(err => toast(t("badFile") + err.message));
-    return;
-  }
-  const fr = new FileReader();
-  fr.onload = () => {
-    try{
-      const cfg = JSON.parse(fr.result);
-      loadConfig(cfg); toast(t("configImported"));
-    }catch(err){ toast(t("badFile") + err.message); }
-  };
-  fr.readAsText(f);
+  const list = [...e.target.files]; e.target.value = "";
+  if(!list.length) return;
+  importList(list).catch(err => toast(t("badFile") + err.message));
+};
+P("missPick").onclick = () => P("fileMissing").click();
+P("missClose").onclick = () => P("dlgMissing").close();
+P("fileMissing").onchange = e => {
+  const list = [...e.target.files]; e.target.value = "";
+  if(!list.length) return;
+  P("dlgMissing").close();
+  filesToMap(list).then(files => attachModels(files, [...files.keys()].filter(k => /\.onnx$/i.test(k))))
+    .catch(err => toast(t("badFile") + err.message));
 };
 function loadConfig(cfg){
   P("projName").value = cfg.project || "TESR Vision Project";
