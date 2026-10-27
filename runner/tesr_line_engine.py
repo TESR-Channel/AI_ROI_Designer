@@ -612,6 +612,7 @@ class LineCounter:
         self.invert = bool(p.get("invert"))
         self.counts = {self.name_in: 0, self.name_out: 0}
         self.lifetime = {self.name_in: 0, self.name_out: 0}
+        self.by_class = {}                # crossings in the "in" direction, per class
         self.seen = {}                    # track id -> last side
         self.clock = PeriodClock(p.get("reset") or reset)
         self.period_start, self.period = self.clock.boundary()
@@ -642,6 +643,9 @@ class LineCounter:
             key = self.name_in if going_in else self.name_out
             self.counts[key] += 1
             self.lifetime[key] += 1
+            if going_in:
+                c = str(tr.get("class") or "")
+                self.by_class[c] = self.by_class.get(c, 0) + 1
             self.dirty = True
             crossed.append((tid, key))
         for tid in [t for t in self.seen if t not in tracks]:
@@ -669,6 +673,7 @@ class LineCounter:
         rec["period_end"] = now.isoformat(timespec="seconds")
         rec["roi"] = self.roi.get("name", "")
         self.counts = {self.name_in: 0, self.name_out: 0}
+        self.by_class = {}
         self.period_start, self.period = start, label
         self.dirty = True
         return rec
@@ -676,6 +681,9 @@ class LineCounter:
     def value(self):
         i, o = self.counts[self.name_in], self.counts[self.name_out]
         v = {self.name_in: i, self.name_out: o, "net": i - o, "total": i + o}
+        if self.by_class:
+            # which classes crossed in - a dashboard can judge each one (chapter 13)
+            v["by_class"] = dict(self.by_class)
         if self.clock.mode != "none":
             # flat keys, because Node-RED and most dashboards read them directly
             v["period"] = self.period
