@@ -33,6 +33,7 @@ License: MIT
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import os
@@ -59,7 +60,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.6"
+STUDIO_VERSION = "1.8.7"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -2897,6 +2898,7 @@ def run(cfg, args):
     src = FrameSource(source, cam.get("width", 0), cam.get("height", 0),
                       kind=args.camera)
     bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
+    last_pic_at = 0.0
 
     stable = {r["id"]: {"cand": None, "count": 0, "last": None,
                         "value": None, "conf": 0.0} for r in rois}
@@ -3046,10 +3048,28 @@ def run(cfg, args):
             t_prev = time.time()
             fps = 0.9 * fps + 0.1 * (1.0 / dt) if dt > 0 else fps
 
-            if show:
+            # the picture for a dashboard: the same view as the window, a few
+            # times a second, as JPEG text on <prefix>/<camera>/frame
+            frame_every = float((rt.get("mqtt") or {}).get("frame_every") or 0)
+            send_pic = (bus.mqtt is not None and frame_every > 0
+                        and time.time() - last_pic_at >= frame_every)
+            if show or send_pic:
                 period_label = next(iter(ctx["counters"].values())).period if ctx["counters"] else ""
                 view = draw_overlay(frame.copy(), cam, results, fps, groups, show_panel,
                                     ctx.get("tracks"), period_label)
+            if send_pic:
+                last_pic_at = time.time()
+                small = view if view.shape[1] <= 640 else cv2.resize(
+                    view, (640, int(view.shape[0] * 640 / view.shape[1])))
+                ok_jpg, jpg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 60])
+                if ok_jpg:
+                    try:
+                        bus.mqtt.publish("%s/%s/frame" % (rt["mqtt"].get("topic_prefix", "tesr/vision"),
+                                                          cam.get("id", "cam")),
+                                         base64.b64encode(jpg.tobytes()).decode("ascii"))
+                    except Exception as exc:
+                        log("MQTT picture failed: %s" % exc, "WARN")
+            if show:
                 cv2.imshow("TESR Vision Runner", view)
                 if args.test:
                     strip = debug_strip(debugs, view.shape[1])
@@ -3227,6 +3247,9 @@ def main():
     ap.add_argument("--broker", metavar="HOST[:PORT]",
                     help="send every reading over MQTT to this broker - the computer running "
                          "Node-RED - whatever the config says (e.g. --broker 192.168.1.50)")
+    ap.add_argument("--frame-every", dest="frame_every", type=float, metavar="SEC",
+                    help="with MQTT on: send the camera picture every SEC seconds on "
+                         "<prefix>/<camera>/frame (default 0.25 with --broker; 0 = never)")
     ap.add_argument("--image", help="run on a single image file")
     ap.add_argument("--once", action="store_true",
                     help="read until every ROI has settled (stable_frames), print one JSON, exit")
@@ -3272,6 +3295,10 @@ def main():
         mq["host"] = host or "localhost"
         if port:
             mq["port"] = int(port)
+        if args.frame_every is None and not mq.get("frame_every"):
+            mq["frame_every"] = 0.25           # a dashboard wants the picture too
+    if args.frame_every is not None:
+        cfg["runtime"]["mqtt"]["frame_every"] = max(0.0, args.frame_every)
 
     if args.list:
         print("project: %s" % cfg.get("project"))

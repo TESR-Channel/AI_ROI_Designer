@@ -85,7 +85,7 @@ def walk(counter, xs, w=640, h=480, tid=1):
             tracks[tid]["hits"] += 1
         else:
             tracks[tid] = {"box": box, "centroid": c, "prev": c, "hits": 1,
-                           "age": 0, "class": ""}
+                           "age": 0, "class": "Orange"}
         counter.update(tracks, w, h)
 
 
@@ -120,8 +120,13 @@ plain = LINE.LineCounter({"id": "g", "name": "g", "points": [[0.5, 0.1], [0.5, 0
                           "params": {}})
 walk(plain, [0.2, 0.35, 0.65, 0.8], tid=1)
 check("reset off: no rollover", plain.roll(dt("2030-01-01 00:00")), None)
-check("reset off: value has the original keys only",
-      sorted(plain.value().keys()), ["in", "net", "out", "total"])
+check("reset off: no period keys (only by_class, which says what crossed)",
+      sorted(plain.value().keys()), ["by_class", "in", "net", "out", "total"])
+check("by_class counts the crossing in, by class",
+      plain.value()["by_class"], {"Orange": 1})
+fresh = LINE.LineCounter({"id": "f", "name": "f", "points": [[0.5, 0.1], [0.5, 0.9]], "params": {}})
+check("nothing crossed: the original keys only",
+      sorted(fresh.value().keys()), ["in", "net", "out", "total"])
 
 
 # --------------------------------------------------------- restart behaviour
