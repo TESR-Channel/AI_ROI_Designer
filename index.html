@@ -560,7 +560,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.7"
+STUDIO_VERSION = "1.8.8"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -3348,6 +3348,13 @@ def run(cfg, args):
         % (platform.system(), platform.machine(), platform.python_version(), cv2.__version__))
     log("camera   : %s (%s)  source=%r" % (cam.get("name"), cam.get("id"), source))
     log("rois     : %s" % ", ".join("%s[%s]" % (r["name"], r["task"]) for r in rois))
+    for r in rois:
+        # a class filter on a line or zone is easy to forget: say what it lets through
+        if r.get("task") in ("line_count", "zone_count"):
+            only = (r.get("params") or {}).get("classes") or []
+            log("counts   : %s - %s" % (r["name"], ("ONLY " + ", ".join(only) +
+                " (every other class is not counted and never reaches MQTT; "
+                "ROI Studio > this line > All classes to count them all)") if only else "every class"))
     tesseract_setup(rois, getattr(args, "config", None))
     text_setup(getattr(args, "config", None))
     if groups:
@@ -4591,7 +4598,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.8.7";
+const STUDIO_VERSION = "1.8.8";
 
 const I18N = {
 th: {
