@@ -60,7 +60,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.10.0"
+STUDIO_VERSION = "1.10.1"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1125,6 +1125,7 @@ def task_plate(crop, roi):
 
 _MODELS = {}
 _ORT = {}
+_STRETCH = {}      # id(session) -> True when the model wants a plain resize
 
 
 def _letterbox(img, size, pad=114):
@@ -1140,6 +1141,26 @@ def _letterbox(img, size, pad=114):
     blob = canvas[:, :, ::-1].astype(np.float32) / 255.0        # BGR -> RGB, 0..1
     blob = np.transpose(blob, (2, 0, 1))[None]                  # NCHW
     return np.ascontiguousarray(blob), scale, dx, dy
+
+
+def _stretch(img, size):
+    """Plain resize to a square, no padding: how AI Vision Trainer models were
+    trained (their ONNX says "resize (stretch)" in its metadata). Letterboxing
+    such a model shrinks and pads what it sees and costs it accuracy."""
+    h, w = img.shape[:2]
+    resized = cv2.resize(img, (size, size), interpolation=cv2.INTER_LINEAR)
+    blob = resized[:, :, ::-1].astype(np.float32) / 255.0
+    blob = np.transpose(blob, (2, 0, 1))[None]
+    return np.ascontiguousarray(blob), size / float(w), size / float(h)
+
+
+def _model_input(sess, img, size):
+    """(blob, sx, sy, dx, dy) - stretch for a model whose metadata asks for it, else letterbox."""
+    if _STRETCH.get(id(sess)):
+        blob, sx, sy = _stretch(img, size)
+        return blob, sx, sy, 0, 0
+    blob, scale, dx, dy = _letterbox(img, size)
+    return blob, scale, scale, dx, dy
 
 
 def _nms(boxes, scores, classes, iou_thr):
@@ -1188,8 +1209,16 @@ def get_onnx(path):
         if p in avail:
             providers.insert(0, p)
     log("loading ONNX model: %s  (%s)" % (path, providers[0]))
-    _ORT[path] = ort.InferenceSession(path, providers=providers)
-    return _ORT[path]
+    sess = ort.InferenceSession(path, providers=providers)
+    try:
+        pre = sess.get_modelmeta().custom_metadata_map.get("preprocess", "")
+    except Exception:
+        pre = ""
+    if "stretch" in pre.lower():
+        _STRETCH[id(sess)] = True
+        log("  %s wants a plain resize (stretch), not a letterbox" % os.path.basename(path))
+    _ORT[path] = sess
+    return sess
 
 
 def onnx_detect(crop, roi):
@@ -1199,7 +1228,7 @@ def onnx_detect(crop, roi):
     if sess is None:
         return None, 0.0, dbg
     size = int(m.get("imgsz", 640))
-    blob, scale, dx, dy = _letterbox(crop, size)
+    blob, sx, sy, dx, dy = _model_input(sess, crop, size)
     out = sess.run(None, {sess.get_inputs()[0].name: blob})[0]
     pred = np.squeeze(out)                       # (4+nc, N) or (N, 4+nc)
     if pred.shape[0] < pred.shape[1]:
@@ -1215,8 +1244,8 @@ def onnx_detect(crop, roi):
     items = []
     if len(pred):
         cx, cy, bw, bh = pred[:, 0], pred[:, 1], pred[:, 2], pred[:, 3]
-        boxes = np.stack([(cx - bw / 2 - dx) / scale, (cy - bh / 2 - dy) / scale,
-                          (cx + bw / 2 - dx) / scale, (cy + bh / 2 - dy) / scale], axis=1)
+        boxes = np.stack([(cx - bw / 2 - dx) / sx, (cy - bh / 2 - dy) / sy,
+                          (cx + bw / 2 - dx) / sx, (cy + bh / 2 - dy) / sy], axis=1)
         for i in _nms(boxes, conf, cls, float(m.get("iou", 0.45))):
             name = names[cls[i]] if cls[i] < len(names) else str(int(cls[i]))
             wanted = m.get("classes") or []
@@ -1243,7 +1272,7 @@ def onnx_classify(crop, roi):
     if sess is None:
         return None, 0.0, dbg
     size = int(m.get("imgsz", 224))
-    blob, _, _, _ = _letterbox(crop, size)
+    blob = _model_input(sess, crop, size)[0]
     out = np.squeeze(sess.run(None, {sess.get_inputs()[0].name: blob})[0]).astype(np.float64)
     if out.min() < 0 or out.max() > 1 or abs(out.sum() - 1) > 0.05:
         e = np.exp(out - out.max())
