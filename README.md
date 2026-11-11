@@ -32,6 +32,7 @@ Point a camera at a machine, a tank, a doorway or a conveyor, mark what you care
 | Box | `presence_diff` | Something appeared, moved or went missing | No |
 | Box | `gauge_needle` | Analogue needle gauge — pressure, temperature, flow | No |
 | Box | `yolo_detect` / `yolo_classify` | Your own trained model, per region | Yes |
+| Box | `parts_check` | Two AIs: find each object (a terminal block), count the parts inside it (screws) → OK / NG | Yes, two |
 | Line | `level_line` | Water level in a tank, silo or sight glass | No |
 | Line | `measure_line` | Part width, gap, any dimension in millimetres | No |
 | Line | `line_count` | People in and out, vehicles, parts passing — with direction | Yes |

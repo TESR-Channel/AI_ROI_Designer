@@ -120,6 +120,7 @@ Preprocessing (letterbox) and decoding (NMS) are written to match on both sides 
 | `presence_diff` | Detect a change or the presence of something | No |
 | `color_check` | Check a status lamp, a tower light or part colour | No |
 | `gauge_needle` | Read an analogue needle gauge — pressure, temperature, flow | No — pure OpenCV |
+| `parts_check` | Two AIs: AI #1 finds each object, it is cut out with a margin, AI #2 counts the parts inside; the expected count = OK, any other = NG | Two `.onnx` detectors |
 
 Each ROI has its own `output_key`, so one frame can publish several values at once.
 
@@ -866,3 +867,30 @@ Every colour is sampled from the TESR logo file, not eyeballed.
 
 TESR Co., Ltd. — Thai Embedded Systems and Robotics
 Build, Train and Deploy AI to Edge Devices
+
+---
+
+## 6.10 Two AIs: find the object, then count its parts (`parts_check`, v1.9.0)
+
+For QC where the object can sit anywhere: a terminal block that must have 8 screws, a relay
+with 4, a tray of 30 cups. One region holds two detectors.
+
+| Field | Meaning |
+|---|---|
+| AI #1 + class | the detector that finds each whole object (`terminal`) |
+| AI #2 + class | the detector that finds the parts inside one cut-out object (`screw`) |
+| count, rule | how many parts make it OK — exactly (`eq`) or at least (`min`) |
+| pad | margin added round each object before it is cut out (0.1 = 10%). Use the margin the AI Vision Trainer's ✂ Crop boxes used when AI #2's photos were made |
+
+The region itself is where to look for objects — **Use the whole picture** sets it to the full
+frame. Boxes from AI #1 lying mostly inside a surer box are dropped (the same object seen twice).
+The published value is a dict:
+
+```json
+{"result": "NG", "objects": 1, "ok": 0, "ng": 1, "found": [7], "expect": 8}
+```
+
+`result` is `none` when no object is in view. In the browser, load several pictures at once and
+step through them with ◀ ▶ (or the arrow keys): every region is read again on each picture.
+On the device, `--image FOLDER` checks every picture in a folder, prints one line per picture
+and writes a labelled copy of each plus `log.csv` to `records/`.
