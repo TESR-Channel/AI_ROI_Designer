@@ -565,7 +565,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.10.1"
+STUDIO_VERSION = "1.10.2"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -807,6 +807,46 @@ def find_model(path):
                     return cand
                 return cand if rel.startswith("..") else rel
     return path
+
+
+def _is_studio_config(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(cfg, dict) and (cfg.get("schema") == SCHEMA or "rois" in cfg or "cameras" in cfg)
+
+
+def find_config(path):
+    """--config left out: use the ROI Studio config sitting in this folder.
+
+    The exported zip names it after the project (my_project_config.json), so a fixed
+    default of config.json misses it. Look in the current folder, then next to this
+    script: config.json first, else the one *_config.json / *.json written by ROI Studio."""
+    if path:
+        if not os.path.isfile(path):
+            raise SystemExit("\nConfig not found: %s\nRun the command in the folder you unzipped, "
+                             "or give the full path:  --config path/to/your_config.json" % path)
+        return path
+    dirs = []
+    for d in (os.getcwd(), os.path.dirname(os.path.abspath(__file__))):
+        if d not in dirs:
+            dirs.append(d)
+    for d in dirs:
+        if os.path.isfile(os.path.join(d, "config.json")) and _is_studio_config(os.path.join(d, "config.json")):
+            return os.path.join(d, "config.json")
+        names = sorted(n for n in os.listdir(d) if n.lower().endswith(".json") and n != "project.json")
+        found = [n for n in names if _is_studio_config(os.path.join(d, n))]
+        if len(found) == 1:
+            full = os.path.join(d, found[0])
+            log("config: %s" % (os.path.relpath(full) if d == os.getcwd() else full))
+            return full
+        if len(found) > 1:
+            raise SystemExit("\nThis folder has %d ROI Studio configs: %s\nPick one:  --config %s"
+                             % (len(found), ", ".join(found), found[0]))
+    raise SystemExit("\nNo ROI Studio config here. Unzip the zip from ROI Studio (Export config + Python),\n"
+                     "run this command inside that folder, or add  --config path/to/your_config.json")
 
 
 def load_config(path):
@@ -4044,7 +4084,8 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser(description="TESR Edge AI Vision Runner v%s" % STUDIO_VERSION)
-    ap.add_argument("--config", default="config.json", help="config.json from TESR ROI Studio")
+    ap.add_argument("--config", default=None,
+                    help="the *_config.json from TESR ROI Studio (default: the one in this folder)")
     ap.add_argument("--camera", type=camera_kind, metavar="{usb,csi,ip,file}",
                     help="camera type, same words as predict.py in chapters 5 and 6: "
                          "usb webcam, csi ribbon camera, ip stream, file on disk")
@@ -4100,7 +4141,7 @@ def main():
     if args.get_lang:
         return get_lang(args.get_lang)
 
-    cfg = load_config(args.config)
+    cfg = load_config(find_config(args.config))
     if args.broker:
         # the same switch as fruit_sorter.py: one flag, MQTT on, to that computer
         host, _, port = args.broker.strip().partition(":")
@@ -4909,7 +4950,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.10.1";
+const STUDIO_VERSION = "1.10.2";
 
 const I18N = {
 th: {
