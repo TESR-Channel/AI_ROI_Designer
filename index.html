@@ -274,7 +274,7 @@
         <div><label data-i18n="orFromUrl"></label>
           <div class="row"><input id="urlInput" placeholder="http://ip/snapshot.jpg">
           <button id="btnUrl" style="flex:0 0 auto" data-i18n="fetchBtn"></button></div></div>
-        <input type="file" id="fileImage" accept="image/*" hidden>
+        <input type="file" id="fileImage" accept="image/*" multiple hidden>
         <div class="hint" data-i18n-html="dropHint"></div>
         <div class="hint" id="fileProtoNote" style="display:none;color:var(--tesr-gold)"
              data-i18n-html="noCameraApi"></div>
@@ -290,6 +290,11 @@
         <button id="modeLive" data-i18n="modeLive"></button>
       </div>
       <button id="btnFileTop" data-i18n="loadImage"></button>
+      <span id="picNav" style="display:none;align-items:center;gap:4px">
+        <button id="btnPicPrev" style="padding:4px 10px">&#9664;</button>
+        <span id="picInfo" style="font-size:12px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis"></span>
+        <button id="btnPicNext" style="padding:4px 10px">&#9654;</button>
+      </span>
       <select id="liveDevice" style="width:150px;display:none" data-i18n-title="chooseCamera"></select>
       <button id="btnFreeze" style="display:none" data-i18n="freezeBtn"></button>
       <label id="liveInferWrap" style="margin:0;display:none;gap:5px;align-items:center;
@@ -560,7 +565,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.9"
+STUDIO_VERSION = "1.9.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1823,6 +1828,119 @@ def task_yolo_classify(crop, roi):
 
 
 # --------------------------------------------------------------------------
+# task : two AIs - find each object, then count the parts inside it
+# --------------------------------------------------------------------------
+# AI #1 (roi "model") finds every object - a terminal block, a relay, a tray.
+# Each object is cut out with a little slack and AI #2 (roi "part_model")
+# counts its parts - screw heads, pins, cups. An object with the expected
+# count is OK, any other count is NG. Both are ordinary YOLO detectors, so a
+# product with 4 screws or a tray of 30 parts needs no new code, only two
+# models and a number.
+#
+# The browser (ROI Studio) does the same in parts_check_js(); if you change
+# the rule here, change it there, or the preview and the device will disagree.
+
+_PARTS_SEEN = {}      # roi id -> what the last frame found, for the window
+
+
+def drop_inner(items, cover=0.6):
+    """A box lying mostly inside a surer box is the same object seen twice."""
+    kept = []
+    for d in sorted(items, key=lambda d: -d.get("conf", 0)):
+        x1, y1, x2, y2 = d["box"]
+        area = max(1, (x2 - x1) * (y2 - y1))
+        if any(max(0, min(x2, k["box"][2]) - max(x1, k["box"][0])) *
+               max(0, min(y2, k["box"][3]) - max(y1, k["box"][1])) > cover * area for k in kept):
+            continue
+        kept.append(d)
+    return kept
+
+
+def _detect_items(img, model, only):
+    """Every detection of one class, as items, whatever kind of model it is."""
+    m = dict(model or {})
+    if only:
+        m["classes"] = [only]
+    items, _, _ = task_yolo_detect(img, {"model": m, "params": {"output": "items"}})
+    return items or []
+
+
+def parts_verdict(found, want, rule="eq"):
+    return found >= want if rule == "min" else found == want
+
+
+def task_parts_check(crop, roi):
+    p = roi.get("params") or {}
+    want = max(1, int(p.get("count", 1)))
+    pad = float(p.get("pad", 0.1))
+    rule = p.get("rule", "eq")
+    dbg = crop.copy()
+    H, W = crop.shape[:2]
+    objects = drop_inner(_detect_items(crop, roi.get("model"), p.get("object_class")))
+    objects.sort(key=lambda o: (o["box"][0], o["box"][1]))       # left to right
+    seen, counts = [], []
+    for o in objects:
+        x1, y1, x2, y2 = o["box"]
+        px, py = (x2 - x1) * pad, (y2 - y1) * pad
+        a, b = int(max(0, x1 - px)), int(max(0, y1 - py))
+        c, d = int(min(W, x2 + px)), int(min(H, y2 + py))
+        if c - a < 8 or d - b < 8:
+            continue
+        parts = _detect_items(crop[b:d, a:c], roi.get("part_model"), p.get("part_class"))
+        ok = parts_verdict(len(parts), want, rule)
+        boxes = [[q["box"][0] + a, q["box"][1] + b, q["box"][2] + a, q["box"][3] + b] for q in parts]
+        seen.append({"box": [x1, y1, x2, y2], "ok": ok, "found": len(parts), "parts": boxes})
+        counts.append(len(parts))
+        col = (60, 180, 60) if ok else TESR_RED
+        cv2.rectangle(dbg, (x1, y1), (x2, y2), col, 2)
+        for q in boxes:
+            cv2.rectangle(dbg, (q[0], q[1]), (q[2], q[3]), (60, 180, 60), 1)
+        _text(dbg, "%s %d/%d" % ("OK" if ok else "NG", len(parts), want),
+              (x1, max(14, y1 - 5)), 0.55, col, 2)
+    _PARTS_SEEN[roi["id"]] = {"size": (W, H), "objects": seen, "want": want}
+    n_ok = sum(1 for s in seen if s["ok"])
+    result = "none" if not seen else ("OK" if n_ok == len(seen) else "NG")
+    value = {"result": result, "objects": len(seen), "ok": n_ok, "ng": len(seen) - n_ok,
+             "found": counts, "expect": want}
+    conf = float(np.mean([o["conf"] for o in objects])) if objects else 0.0
+    return value, conf, dbg
+
+
+def crop_to_frame(pts, rect, frame_w, frame_h, crop_w, crop_h):
+    """Points measured on crop_roi()'s upright crop, back onto the frame."""
+    src = np.array([[0, 0], [crop_w - 1, 0], [crop_w - 1, crop_h - 1], [0, crop_h - 1]],
+                   dtype=np.float32)
+    M = cv2.getPerspectiveTransform(src, roi_corners(rect, frame_w, frame_h))
+    arr = np.array(pts, dtype=np.float32).reshape(-1, 1, 2)
+    return cv2.perspectiveTransform(arr, M).reshape(-1, 2)
+
+
+def draw_parts(frame, roi):
+    """Green box = OK, red box = NG, with found/expected; a small box per part."""
+    seen = _PARTS_SEEN.get(roi["id"])
+    if not seen or not roi.get("rect"):
+        return
+    h, w = frame.shape[:2]
+    cw, ch = seen["size"]
+    big = max(0.6, min(1.4, h / 700.0))
+    for o in seen["objects"]:
+        x1, y1, x2, y2 = o["box"]
+        q = crop_to_frame([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], roi["rect"], w, h, cw, ch)
+        col = (60, 180, 60) if o["ok"] else TESR_RED
+        cv2.polylines(frame, [q.astype(np.int32)], True, col, 3, cv2.LINE_AA)
+        for b in o["parts"]:
+            c = crop_to_frame([[(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0]], roi["rect"], w, h, cw, ch)[0]
+            r = max(4, int(0.25 * min(b[2] - b[0], b[3] - b[1]) * w / max(1, cw)))
+            cv2.circle(frame, (int(c[0]), int(c[1])), r, (60, 180, 60), 2, cv2.LINE_AA)
+        s = "%s %d/%d" % ("OK" if o["ok"] else "NG", o["found"], seen["want"])
+        tw, th = _text_size(s, big, 2)
+        tx, ty = int(q[:, 0].min()), int(q[:, 1].min()) - 8
+        ty = max(th + 34, ty)
+        _panel(frame, tx - 4, ty - th - 6, tw + 10, th + 12, 0.85)
+        _text(frame, s, (tx + 1, ty), big, col, 2)
+
+
+# --------------------------------------------------------------------------
 # task 4 : barcode / QR
 # --------------------------------------------------------------------------
 
@@ -2474,6 +2592,7 @@ TASKS = {
     "presence_diff": task_presence,
     "color_check": task_color,
     "gauge_needle": task_gauge,
+    "parts_check": task_parts_check,
 }
 
 
@@ -2766,6 +2885,7 @@ TASK_COLOUR = {
     "measure_line": TESR_GOLD,
     "line_count": (110, 220, 250),   # counting gate
     "zone_count": (150, 210, 140),   # occupancy zone
+    "parts_check": (60, 180, 60),    # two AIs: object, then its parts
 }
 
 
@@ -3140,6 +3260,12 @@ def value_text(roi, val):
     """
     if val is None or val == "":
         return "-"
+    if roi.get("task") == "parts_check" and isinstance(val, dict):
+        r = val.get("result", "none")
+        if r == "none":
+            return "-"
+        n = val.get("objects", 0)
+        return r if n <= 1 else "%s %d/%d" % (r, val.get("ok", 0), n)
     if isinstance(val, dict):
         return count_text(roi, val)        # report:"all" hands back the whole dict
     if isinstance(val, (list, tuple)):
@@ -3208,6 +3334,10 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
         # index tag in the corner, always small enough to fit
         _panel(frame, x0, y0, 18, 14, 0.85)
         _text(frame, str(i), (x0 + 4, y0 + 11), 0.36, TESR_GOLD)
+
+        if roi["task"] == "parts_check":
+            draw_parts(frame, roi)          # each object carries its own OK / NG
+            continue
 
         # the reading itself, inside the box so neighbours never collide
         s = value_text(roi, val)
@@ -3650,6 +3780,123 @@ def run(cfg, args):
 
 
 # --------------------------------------------------------------------------
+# a folder of pictures : every picture once, a labelled copy + log.csv each
+# --------------------------------------------------------------------------
+
+def run_folder(cfg, args):
+    """--image FOLDER: check every picture in it, in name order.
+
+    A picture is read once - there is nothing to settle on a still - and every
+    region's reading is printed on one line. The labelled picture goes to the
+    records folder as 0001_OK_<name>.jpg, with a line in records/log.csv, so
+    what the program decided can be looked at afterwards. With a window, any
+    key shows the next picture and q stops.
+    """
+    cam = pick_camera(cfg, args.camera_id)
+    rt = cfg["runtime"]
+    rois = [r for r in cam.get("rois", []) if r.get("enabled", True)
+            and r.get("task") not in FRAME_TASKS]
+    files = sorted(f for f in os.listdir(args.image) if f.lower().endswith(IMG_EXT))
+    if not files:
+        raise SystemExit("[FATAL] no pictures (%s) in %s" % (" ".join(IMG_EXT), args.image))
+    show = (rt.get("show_window", True) or args.test) and not args.headless and gui_available()
+    out = None if args.no_records else args.records
+    log("version  : runner v%s" % STUDIO_VERSION)
+    log("pictures : %d in %s" % (len(files), args.image))
+    log("rois     : %s" % ", ".join("%s[%s]" % (r["name"], r["task"]) for r in rois))
+    for r in rois:
+        if r.get("task") == "parts_check":
+            q = r.get("params") or {}
+            log("check    : %s - every %s must have %s%d %s"
+                % (r["name"], q.get("object_class") or "object", ">= " if q.get("rule") == "min" else "",
+                   int(q.get("count", 1)), q.get("part_class") or "part"))
+    tesseract_setup(rois, getattr(args, "config", None))
+    text_setup(getattr(args, "config", None))
+    seq, writer, logf = 0, None, None
+    if out:
+        ensure_dir(os.path.join(out, "x"))
+        done = [f for f in os.listdir(out) if f[:4].isdigit()]
+        seq = max([int(f[:4]) for f in done] or [0])
+        new = not os.path.isfile(os.path.join(out, "log.csv"))
+        logf = open(os.path.join(out, "log.csv"), "a", newline="", encoding="utf-8")
+        writer = csv.writer(logf)
+        if new:
+            writer.writerow(["seq", "time", "picture", "result", "roi", "value", "saved_as"])
+        log("records  : %s/ (labelled pictures + log.csv, next #%04d)" % (out, seq + 1))
+    bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
+    tally = {"OK": 0, "NG": 0, "-": 0}
+    try:
+        for name in files:
+            if not RUNNING:
+                break
+            frame = cv2.imread(os.path.join(args.image, name))
+            if frame is None:
+                log("cannot read %s - skipped" % name, "WARN")
+                continue
+            if cam.get("rotate"):
+                code = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
+                        270: cv2.ROTATE_90_COUNTERCLOCKWISE}.get(int(cam["rotate"]))
+                if code is not None:
+                    frame = cv2.rotate(frame, code)
+            results, bits, verdicts = {}, [], []
+            for roi in rois:
+                fn = TASKS.get(roi["task"])
+                if fn is None:
+                    continue
+                crop = crop_roi(frame, roi["rect"], upscale_to=roi.get("upscale_to", 0))
+                try:
+                    value, conf, _ = fn(crop, roi)
+                except Exception as exc:
+                    log("ROI '%s' failed on %s: %s" % (roi["name"], name, exc), "WARN")
+                    continue
+                results[roi["id"]] = {"value": value, "conf": conf}
+                if roi["task"] == "parts_check" and isinstance(value, dict):
+                    if value.get("result") in ("OK", "NG"):
+                        verdicts.append(value["result"])
+                    bits.append("%s = %s  found %s of %d" % (
+                        roi["name"], value.get("result"),
+                        "/".join(str(n) for n in value.get("found") or []) or "0",
+                        value.get("expect", 0)))
+                else:
+                    v = verdict_for(roi, value)
+                    if v:
+                        verdicts.append("OK" if v == "ok" else "NG")
+                    bits.append("%s = %s" % (roi["name"], value_text(roi, value)))
+                bus.publish(roi, roi.get("output_key") or roi["name"], value, conf,
+                            changed=True, echo=False)
+            result = "-" if not verdicts else ("OK" if all(v == "OK" for v in verdicts) else "NG")
+            tally[result] += 1
+            print("[%s] %-22s %s" % (result.ljust(2), name, "   ".join(bits)), flush=True)
+            view = draw_overlay(frame.copy(), cam, results, 0.0, [], not args.no_panel)
+            saved = ""
+            if out:
+                seq += 1
+                saved = "%04d_%s_%s.jpg" % (seq, result if result != "-" else "NA",
+                                            os.path.splitext(name)[0])
+                cv2.imwrite(os.path.join(out, saved), view)
+                for roi in rois:
+                    if roi["id"] in results:
+                        writer.writerow([seq, now_iso(), name, result, roi["name"],
+                                         json.dumps(results[roi["id"]]["value"], ensure_ascii=False),
+                                         saved])
+                logf.flush()
+            if show:
+                h = view.shape[0]
+                small = view if h <= 900 else cv2.resize(view, (int(view.shape[1] * 900 / h), 900))
+                cv2.imshow("TESR Vision Runner", small)
+                if (cv2.waitKey(0) & 0xFF) in (ord("q"), 27):
+                    break
+    finally:
+        if logf:
+            logf.close()
+        bus.close()
+        close_windows()
+    log("done     : %d picture(s) - OK %d, NG %d%s"
+        % (sum(tally.values()), tally["OK"], tally["NG"],
+           (", no verdict %d" % tally["-"]) if tally["-"] else ""))
+
+
+# --------------------------------------------------------------------------
 # calibrate mode : live trackbars, prints the values to paste back in the JSON
 # --------------------------------------------------------------------------
 
@@ -3782,7 +4029,13 @@ def main():
     ap.add_argument("--frame-every", dest="frame_every", type=float, metavar="SEC",
                     help="with MQTT on: send the camera picture every SEC seconds on "
                          "<prefix>/<camera>/frame (default 0.25 with --broker; 0 = never)")
-    ap.add_argument("--image", help="run on a single image file")
+    ap.add_argument("--image", help="run on one picture, or on every picture in a folder "
+                    "(a labelled copy of each goes to --records)")
+    ap.add_argument("--records", default="records", metavar="DIR",
+                    help="with --image FOLDER: where the labelled pictures and log.csv go "
+                    "(default records)")
+    ap.add_argument("--no-records", dest="no_records", action="store_true",
+                    help="with --image FOLDER: print only, save nothing")
     ap.add_argument("--once", action="store_true",
                     help="read until every ROI has settled (stable_frames), print one JSON, exit")
     ap.add_argument("--test", action="store_true", help="show preview window + ROI debug panel")
@@ -3847,6 +4100,10 @@ def main():
 
     if args.calibrate:
         calibrate(cfg, args)
+        return 0
+
+    if args.image and os.path.isdir(args.image):
+        run_folder(cfg, args)
         return 0
 
     run(cfg, args)
@@ -4623,7 +4880,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.8.9";
+const STUDIO_VERSION = "1.9.0";
 
 const I18N = {
 th: {
@@ -4745,6 +5002,16 @@ th: {
   task_barcode_qr:"Barcode / QR", task_presence_diff:"ตรวจการเปลี่ยนแปลง / มีของ",
   task_color_check:"ตรวจสี (ไฟสถานะ)",
   task_gauge_needle:"อ่านเกจเข็ม (หน้าปัดกลม)",
+  task_parts_check:"AI 2 ชั้น: หาวัตถุ → นับชิ้นส่วน → OK/NG",
+  pcHint:"AI #1 หาวัตถุแต่ละชิ้น → ตัดกรอบออกมา → AI #2 นับชิ้นส่วนข้างใน → ครบตามจำนวน = OK · ไม่ครบ = NG. กรอบ ROI นี้คือพื้นที่ที่ให้หาวัตถุ — กด ใช้ทั้งภาพ ถ้าวัตถุอยู่ตรงไหนก็ได้",
+  pcObject:"① AI #1 — หาวัตถุ", pcPart:"② AI #2 — นับชิ้นส่วนในวัตถุ",
+  pcClass:"คลาส", pcAnyClass:"ทุกคลาส", pcCount:"③ ครบกี่ชิ้น = OK", pcCountN:"จำนวนชิ้นส่วน",
+  pcRule:"OK เมื่อนับได้", pcRuleEq:"พอดีเท่านี้", pcRuleMin:"อย่างน้อยเท่านี้",
+  pcPad:"เผื่อขอบตอนตัดกรอบ (0.1 = 10%)",
+  pcPadHint:"ใช้ค่าเดียวกับตอน ✂ ตัดกรอบ ใน AI Vision Trainer (ค่าเริ่ม 10%) ภาพที่ AI #2 เห็นตอนใช้งานจะได้เหมือนตอนเทรน",
+  pcWhole:"ใช้ทั้งภาพ", pcNeedModels:"เลือกโมเดลให้ครบทั้ง AI #1 และ AI #2 ก่อน",
+  pcNoObject:"ไม่เจอวัตถุ", pcConf1:"conf AI #1", pcConf2:"conf AI #2",
+  picOf:"รูป", picKeys:"← → เปลี่ยนรูป ทุกกรอบอ่านใหม่ให้เอง",
 
   /* task params */
   pDigits:"จำนวนหลักในกรอบนี้", pDecimals:"ทศนิยม",
@@ -5022,6 +5289,16 @@ en: {
   task_barcode_qr:"Barcode / QR", task_presence_diff:"Change / presence detection",
   task_color_check:"Colour check (status lamp)",
   task_gauge_needle:"Read an analogue needle gauge",
+  task_parts_check:"Two AIs: find the object → count its parts → OK/NG",
+  pcHint:"AI #1 finds each object → it is cut out → AI #2 counts the parts inside → the right count = OK, any other = NG. This ROI is where to look for objects — press Use the whole picture if they can be anywhere",
+  pcObject:"① AI #1 — finds the object", pcPart:"② AI #2 — counts the parts inside it",
+  pcClass:"Class", pcAnyClass:"Any class", pcCount:"③ How many parts = OK", pcCountN:"Number of parts",
+  pcRule:"OK when the count is", pcRuleEq:"exactly this", pcRuleMin:"at least this",
+  pcPad:"Margin around each cut-out (0.1 = 10%)",
+  pcPadHint:"Use the same margin as ✂ Crop boxes in the AI Vision Trainer (10% by default), so AI #2 sees the same kind of picture it was trained on",
+  pcWhole:"Use the whole picture", pcNeedModels:"Pick both models, AI #1 and AI #2, first",
+  pcNoObject:"no object found", pcConf1:"conf AI #1", pcConf2:"conf AI #2",
+  picOf:"picture", picKeys:"← → change picture, every ROI is read again",
 
   pDigits:"Digits in this ROI", pDecimals:"Decimals",
   digitsHint:"Defaults to <b>1 digit</b> — one ROI per digit copes best with uneven lighting and camera angle. To read a whole reading in one box, set the real digit count, e.g. 4.",
@@ -5265,6 +5542,7 @@ const TASKS = {
   presence_diff:{color:"#86C97F", model:false},
   color_check:  {color:"#C89BD8", model:false},
   gauge_needle: {color:"#E0BE5A", model:false},
+  parts_check:  {color:"#3CB43C", model:true},
 };
 const taskLabel = k => t("task_" + k);
 const taskShape = k => (TASKS[k] && TASKS[k].shape) || "rect";
@@ -5297,6 +5575,7 @@ function defaultParams(task){
                                  preprocess:true, invert:false};
     case "yolo_detect":  return {output:"count"};
     case "yolo_classify":return {};
+    case "parts_check":  return {object_class:"", part_class:"", count:1, rule:"eq", pad:0.1};
     case "barcode_qr":   return {qr:true, barcode:true};
     case "presence_diff":return {sensitivity:25, min_ratio:0.05, reference:"first"};
     case "color_check":  return {h_min:170,h_max:10,s_min:120,s_max:255,v_min:80,v_max:255,min_ratio:0.2,output:"bool"};  // red, and red wraps: 170..179 plus 0..10
@@ -5317,7 +5596,12 @@ function defaultParams(task){
 function defaultModel(task){
   if(task === "yolo_detect")   return {path:"yolov8n.pt", classes:[]};
   if(task === "yolo_classify") return {path:"yolov8n-cls.pt"};
+  if(task === "parts_check")   return {path:"", classes:[]};      // AI #1, the object
   return null;
+}
+/* parts_check carries a second model: AI #2, which counts the parts */
+function defaultPartModel(task){
+  return task === "parts_check" ? {path:"", classes:[]} : null;
 }
 const hasNum = v => v !== "" && v != null && isFinite(+v);
 
@@ -5667,6 +5951,12 @@ function drawRoi(roi, active){
     ctx.fillStyle = "#F2F2F2"; ctx.fillText(txt, top.x + 7, top.y - 7);
   }
 
+  if(roi.task === "parts_check" && res && res.objects && res.crop){
+    const p = rectPx(roi), ca = Math.cos(p.a), sa = Math.sin(p.a);
+    const kx = p.w / res.crop.width, ky = p.h / res.crop.height;
+    drawPartsOn(ctx, res, ([bx, by]) => { const lx = bx*kx - p.w/2, ly = by*ky - p.h/2;
+      return toScr(p.cx + lx*ca - ly*sa, p.cy + lx*sa + ly*ca); }, 16);
+  }
   if(res && res.items && res.items.length && res.crop){
     const p = rectPx(roi), ca = Math.cos(p.a), sa = Math.sin(p.a);
     const kx = p.w / res.crop.width, ky = p.h / res.crop.height;
@@ -5911,6 +6201,7 @@ function addRoi(x, y, w, h){
                upscale_to: task === "digits_7seg" ? 160 : (task === "plate_ocr" ? 200 : 0),
                params: defaultParams(task)};
   const m = defaultModel(task); if(m) roi.model = m;
+  const m2 = defaultPartModel(task); if(m2) roi.part_model = m2;
   if(roi.shape !== "rect"){
     // a line or a polygon is placed inside the box that was just dragged out
     const dp = defaultPoints(task);
@@ -6351,6 +6642,69 @@ function renderTaskParams(r){
                     picked || r.model.id ? t("clsNoNames") : t("expectNoNames"))));
     }
     add(field(t("pDeployName"), txt(r.model,"path")));
+  } else if(r.task === "parts_check"){
+    r.model = r.model || defaultModel(r.task);
+    r.part_model = r.part_model || defaultPartModel(r.task);
+    const hint = document.createElement("div");
+    hint.className = "hint"; hint.textContent = t("pcHint"); add(hint);
+    const whole = document.createElement("button");
+    whole.textContent = t("pcWhole");
+    whole.onclick = () => {
+      r.rect = {x:0, y:0, w:1, h:1, angle:0};
+      syncProps(); renderRoiList(); updatePreview(); invalidate();
+    };
+    add(whole);
+    /* one model and the class it should look for - both picked, never typed */
+    const pickPair = (title, holder, key) => {
+      const head = document.createElement("div");
+      head.className = "hint"; head.style.fontWeight = "700"; head.style.marginTop = "8px";
+      head.textContent = title; add(head);
+      const pick = document.createElement("select");
+      const none = document.createElement("option");
+      none.value = ""; none.textContent = models.length ? t("pickModel") : t("noModelYet");
+      pick.appendChild(none);
+      models.filter(m => m.type === "detect").forEach(m => {
+        const o = document.createElement("option"); o.value = m.id;
+        o.textContent = m.name + "  (" + (m.names.length || "?") + " " + t("classesCount") + ")";
+        pick.appendChild(o);
+      });
+      pick.value = holder.id || "";
+      pick.onchange = () => {
+        const m = models.find(x => x.id === pick.value);
+        if(m){
+          attachModel(holder, m);
+          // one class in the model: that is the one to look for
+          if(m.names && m.names.length === 1) p[key] = m.names[0];
+          else if(p[key] && (m.names || []).indexOf(p[key]) < 0) p[key] = "";
+        } else delete holder.id;
+        syncProps(); updatePreview(); invalidate();
+      };
+      const picked = models.find(x => x.id === holder.id);
+      const names = (picked && picked.names && picked.names.length) ? picked.names : (holder.class_names || []);
+      const cls = document.createElement("select");
+      [["", t("pcAnyClass")]].concat(names.map(n => [n, n])).forEach(([v, label]) => {
+        const o = document.createElement("option"); o.value = v; o.textContent = label; cls.appendChild(o);
+      });
+      if(p[key] && names.indexOf(p[key]) < 0){
+        const o = document.createElement("option");
+        o.value = p[key]; o.textContent = p[key] + "   " + t("expectUnknown"); cls.appendChild(o);
+      }
+      cls.value = p[key] || "";
+      cls.onchange = () => { p[key] = cls.value; updatePreview(); invalidate(); };
+      add(rowOf([field(t("pModelUse"), pick), field(t("pcClass"), cls)]));
+    };
+    pickPair(t("pcObject"), r.model, "object_class");
+    pickPair(t("pcPart"), r.part_model, "part_class");
+    const head3 = document.createElement("div");
+    head3.className = "hint"; head3.style.fontWeight = "700"; head3.style.marginTop = "8px";
+    head3.textContent = t("pcCount"); add(head3);
+    add(rowOf([field(t("pcCountN"), num(p, "count", {min:1, step:1})),
+               field(t("pcRule"), sel(p, "rule", [["eq", t("pcRuleEq")], ["min", t("pcRuleMin")]]))]));
+    add(rowOf([field(t("pcConf1"), num(r.model, "conf", {min:0, max:1, step:0.05, placeholder:"0.25"})),
+               field(t("pcConf2"), num(r.part_model, "conf", {min:0, max:1, step:0.05, placeholder:"0.25"})),
+               field(t("pcPad"), num(p, "pad", {min:0, max:0.5, step:0.02}))]));
+    const padHint = document.createElement("div");
+    padHint.className = "hint"; padHint.textContent = t("pcPadHint"); add(padHint);
   } else if(r.task === "barcode_qr"){
     add(rowOf([field(t("pReadQr"), sel(p,"qr",[[true,t("enabled")],[false,t("disabled")]])),
                field(t("pReadBarcode"), sel(p,"barcode",[[true,t("enabled")],[false,t("disabled")]]))]));
@@ -6436,6 +6790,7 @@ P("pTask").onchange = () => {
     }
   }
   const m = defaultModel(r.task); if(m) r.model = m; else delete r.model;
+  const m2 = defaultPartModel(r.task); if(m2) r.part_model = m2; else delete r.part_model;
   if(r.task === "digits_7seg" && !r.upscale_to) r.upscale_to = 160;
   syncProps(); renderRoiList(); updatePreview(); invalidate();
 };
@@ -6509,9 +6864,13 @@ function setBackground(dataUrl){
   const im = new Image();
   im.onload = () => {
     imgCache.set(c.id, im);
+    const same = pics.pending && state.view.fitted &&
+                 c.width === im.naturalWidth && c.height === im.naturalHeight;
     c.bg = dataUrl; c.width = im.naturalWidth; c.height = im.naturalHeight;
-    state.view.fitted = false;
-    renderAll(); fit(); toast(t("imgLoaded") + im.naturalWidth + "×" + im.naturalHeight);
+    if(!same) state.view.fitted = false;
+    renderAll(); if(!same) fit();
+    if(pics.pending) picsLoaded();
+    else toast(t("imgLoaded") + im.naturalWidth + "×" + im.naturalHeight);
   };
   im.onerror = () => toast(t("imgFailed"));
   im.src = dataUrl;
@@ -6535,7 +6894,49 @@ function readFile(file){
 }
 P("btnFileTop").onclick = () => P("fileImage").click();
 P("verTag").textContent = STUDIO_VERSION;
-P("fileImage").onchange = e => { if(e.target.files[0]) readFile(e.target.files[0]); e.target.value = ""; };
+/* Several pictures at once: step through them with the arrows (or the ← →
+   keys) and every ROI is read again on each, so a folder of OK and NG photos
+   can be checked one after another without loading each by hand. */
+const pics = {list:[], i:0};
+function showPic(i){
+  if(!pics.list.length) return;
+  pics.i = (i + pics.list.length) % pics.list.length;
+  const f = pics.list[pics.i];
+  P("picInfo").textContent = (pics.i + 1) + " / " + pics.list.length + "  " + f.name;
+  P("picInfo").title = t("picKeys");
+  pics.pending = true;
+  readFile(f);
+}
+function picsLoaded(){
+  if(!pics.pending) return;
+  pics.pending = false;
+  live.results = {};
+  invalidate();
+  const c = cam();
+  if(!c || !c.rois.some(r => r.enabled !== false)) return;
+  // a reading of the previous picture may still be running: wait for it, so
+  // this picture is read too, and not shown with the last one's answer
+  const go = () => { if(live.busy) return setTimeout(go, 60); live.results = {}; evalAll(); };
+  go();
+}
+P("btnPicPrev").onclick = () => showPic(pics.i - 1);
+P("btnPicNext").onclick = () => showPic(pics.i + 1);
+document.addEventListener("keydown", e => {
+  if(pics.list.length < 2 || live.on) return;
+  const tag = (e.target && e.target.tagName) || "";
+  if(/INPUT|SELECT|TEXTAREA/.test(tag)) return;
+  if(e.key === "ArrowRight"){ showPic(pics.i + 1); e.preventDefault(); }
+  if(e.key === "ArrowLeft"){ showPic(pics.i - 1); e.preventDefault(); }
+});
+P("fileImage").onchange = e => {
+  const list = [...e.target.files].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|bmp|webp)$/i.test(f.name))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
+  e.target.value = "";
+  if(!list.length) return;
+  pics.list = list.length > 1 ? list : [];
+  P("picNav").style.display = list.length > 1 ? "inline-flex" : "none";
+  if(list.length > 1) showPic(0); else readFile(list[0]);
+};
 wrap.addEventListener("dragover", e => e.preventDefault());
 wrap.addEventListener("drop", e => { e.preventDefault();
   const list = [...e.dataTransfer.files];
@@ -8354,10 +8755,89 @@ const qrDetector = (typeof BarcodeDetector !== "undefined")
   ? new BarcodeDetector({formats:["qr_code","code_128","code_39","ean_13"]}) : null;
 const prevGray = {};
 
+/* Two AIs in the browser - the runner's task_parts_check(). Same rule: AI #1's
+   boxes, the ones lying mostly inside a surer box dropped, each cut out with
+   the margin, AI #2 counts the parts in it; the expected count = OK. */
+function dropInnerJS(items, cover){
+  const c = cover || 0.6, kept = [];
+  items.slice().sort((a, b) => b.conf - a.conf).forEach(d => {
+    const [x1, y1, x2, y2] = d.box, area = Math.max(1, (x2 - x1) * (y2 - y1));
+    if(kept.some(k => Math.max(0, Math.min(x2, k.box[2]) - Math.max(x1, k.box[0])) *
+                      Math.max(0, Math.min(y2, k.box[3]) - Math.max(y1, k.box[1])) > c * area)) return;
+    kept.push(d);
+  });
+  return kept;
+}
+async function partsCheckJS(roi, crop){
+  const p = roi.params || {};
+  const m1 = models.find(x => x.id === (roi.model && roi.model.id));
+  const m2 = models.find(x => x.id === (roi.part_model && roi.part_model.id));
+  if(!m1 || !m2) return {value:null, conf:0, crop, note:t("pcNeedModels")};
+  const want = Math.max(1, Math.round(+p.count || 1));
+  const pad = hasNum(p.pad) ? +p.pad : 0.1;
+  const r1 = await runModel(m1, crop, roi.model);
+  const objs = dropInnerJS(r1.items.filter(d => !p.object_class || d.name === p.object_class))
+    .sort((a, b) => a.box[0] - b.box[0] || a.box[1] - b.box[1]);
+  const out = [];
+  for(const o of objs){
+    const [x1, y1, x2, y2] = o.box, px = (x2 - x1) * pad, py = (y2 - y1) * pad;
+    const a = Math.trunc(Math.max(0, x1 - px)), b = Math.trunc(Math.max(0, y1 - py));
+    const c = Math.trunc(Math.min(crop.width, x2 + px)), d = Math.trunc(Math.min(crop.height, y2 + py));
+    if(c - a < 8 || d - b < 8) continue;
+    const sub = document.createElement("canvas");
+    sub.width = c - a; sub.height = d - b;
+    sub.getContext("2d").drawImage(crop, a, b, c - a, d - b, 0, 0, c - a, d - b);
+    const r2 = await runModel(m2, sub, roi.part_model);
+    const parts = r2.items.filter(q => !p.part_class || q.name === p.part_class)
+      .map(q => ({box:[q.box[0] + a, q.box[1] + b, q.box[2] + a, q.box[3] + b], conf:q.conf}));
+    const ok = p.rule === "min" ? parts.length >= want : parts.length === want;
+    out.push({box:o.box, conf:o.conf, ok, found:parts.length, parts});
+  }
+  const nOk = out.filter(o => o.ok).length;
+  let value;
+  if(!out.length) value = t("pcNoObject");
+  else if(out.length === 1) value = (out[0].ok ? "OK " : "NG ") + out[0].found + "/" + want;
+  else value = (nOk === out.length ? "OK " : "NG ") + "· OK " + nOk + " / NG " + (out.length - nOk);
+  return {value, conf: objs.length ? objs.reduce((s, o) => s + o.conf, 0) / objs.length : 0,
+          crop, objects: out, want, items: []};
+}
+/* the boxes from partsCheckJS, drawn on any 2D context: map() takes a point
+   in crop pixels to that context's pixels */
+function drawPartsOn(g, res, map, big){
+  res.objects.forEach(o => {
+    const col = o.ok ? "#46C06E" : "#F30006";
+    const q = [[o.box[0], o.box[1]], [o.box[2], o.box[1]], [o.box[2], o.box[3]], [o.box[0], o.box[3]]].map(map);
+    g.lineWidth = 3; g.strokeStyle = col;
+    g.beginPath(); g.moveTo(q[0].x, q[0].y);
+    for(let i = 1; i < 4; i++) g.lineTo(q[i].x, q[i].y);
+    g.closePath(); g.stroke();
+    g.lineWidth = 2; g.strokeStyle = "#46C06E";
+    o.parts.forEach(q => {
+      const b = q.box || q;
+      const m = map([(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]);
+      const e = map([b[2], (b[1] + b[3]) / 2]);
+      const rad = Math.max(3, Math.hypot(e.x - m.x, e.y - m.y) * 0.6);
+      g.beginPath(); g.arc(m.x, m.y, rad, 0, 7); g.stroke();
+    });
+    const txt = (o.ok ? "OK " : "NG ") + o.found + "/" + res.want;
+    g.font = "bold " + big + "px ui-monospace, monospace";
+    const tw = g.measureText(txt).width;
+    const top = q.reduce((a, b) => b.y < a.y ? b : a, q[0]);
+    const left = Math.min(...q.map(v => v.x));
+    const y = Math.max(big + 6, top.y - 6);
+    g.fillStyle = "rgba(11,11,11,.85)"; g.fillRect(left, y - big - 2, tw + 10, big + 8);
+    g.fillStyle = col; g.fillText(txt, left + 5, y);
+  });
+}
+
 async function evalRoi(roi){
   const crop = cropRoiCanvas(roi);
   if(!crop) return null;
   const w = crop.width, h = crop.height;
+  if(roi.task === "parts_check"){
+    try{ return await partsCheckJS(roi, crop); }
+    catch(e){ return {value:null, conf:0, crop, note: t("modelRunFail") + e.message}; }
+  }
   if(roi.task === "digits_7seg"){
     const r = readDigits(grayOf(crop), w, h, roi.params);
     let text = r.text;
@@ -8716,6 +9196,7 @@ function updatePreviewNow(){
         g.fillText(d.name + " " + d.conf.toFixed(2), d.box[0]+2, Math.max(11, d.box[1]-3));
       });
     }
+    if(res && res.objects) drawPartsOn(g, res, ([x, y]) => ({x, y}), Math.max(14, Math.round(h / 18)));
     if(res && res.gauge) drawGaugeOverlay(g, res.gauge, r.params || {});
     P("pvValue").textContent = res && res.value !== null && res.value !== ""
                               ? String(res.value) : "—";
@@ -9259,18 +9740,21 @@ function buildConfig(includeRef){
           o.shape = r.shape;
           o.points = (r.points || []).map(q => [+(+q[0]).toFixed(5), +(+q[1]).toFixed(5)]);
         }
-        if(r.model){
-          const m = models.find(x => x.id === r.model.id);
-          o.model = Object.assign({}, r.model);
+        const modelOut = rm => {
+          const m = models.find(x => x.id === rm.id);
+          const out = Object.assign({}, rm);
           if(m){
-            o.model.path = m.deploy;
-            if(m.names && m.names.length) o.model.class_names = m.names;
-            o.model.imgsz = fileImgsz(m) || (+o.model.imgsz > 0 ? +o.model.imgsz : m.size);
-            if(!hasNum(o.model.conf)) o.model.conf = m.conf;
-            if(!hasNum(o.model.iou))  o.model.iou  = m.iou;
+            out.path = m.deploy;
+            if(m.names && m.names.length) out.class_names = m.names;
+            out.imgsz = fileImgsz(m) || (+out.imgsz > 0 ? +out.imgsz : m.size);
+            if(!hasNum(out.conf)) out.conf = m.conf;
+            if(!hasNum(out.iou))  out.iou  = m.iou;
           }
-          delete o.model.id;             // browser-only handle, meaningless on the edge device
-        }
+          delete out.id;                 // browser-only handle, meaningless on the edge device
+          return out;
+        };
+        if(r.model) o.model = modelOut(r.model);
+        if(r.part_model && r.task === "parts_check") o.part_model = modelOut(r.part_model);
         return o;
       })
     }))
@@ -9441,7 +9925,10 @@ function downloadBlob(name, blob){
 function modelsInUse(){
   const used = new Set();
   state.cameras.forEach(c => {
-    (c.rois || []).forEach(r => { if(r.model && r.model.id) used.add(r.model.id); });
+    (c.rois || []).forEach(r => {
+      if(r.model && r.model.id) used.add(r.model.id);
+      if(r.part_model && r.part_model.id) used.add(r.part_model.id);
+    });
     if(c.detector && c.detector.id) used.add(c.detector.id);
   });
   return models.filter(m => used.has(m.id));
@@ -9472,6 +9959,8 @@ function projectReadme(cfgName, mdls){
     "",
     "    python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 0 --test",
     "    python tesr_vision_runner.py --config " + cfgName + " --image photo.jpg --once",
+    "    python tesr_vision_runner.py --config " + cfgName + " --image my_photos",
+    "      (a folder: every picture once, a labelled copy of each + log.csv in records/)",
     "    python tesr_vision_runner.py --config " + cfgName + " --headless",
     "    python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 2 --broker 192.168.1.50",
     "      (--broker = send every reading over MQTT to that computer, e.g. Node-RED)",
@@ -9570,6 +10059,8 @@ function modelRefs(){
     (c.rois || []).forEach(r => {
       if(r.model && r.model.path)
         refs.push({holder: r.model, kind: r.task === "yolo_classify" ? "classify" : "detect"});
+      if(r.part_model && r.part_model.path)
+        refs.push({holder: r.part_model, kind: "detect"});
     });
   });
   return refs;
@@ -9733,6 +10224,7 @@ cams,
 "",
 "3) ทดสอบกับภาพนิ่งก่อน",
 "   python tesr_vision_runner.py --config " + cfg + " --image photo.jpg --once",
+"   python tesr_vision_runner.py --config " + cfg + " --image my_photos       ← ทั้งโฟลเดอร์ · ภาพที่ตีผลแล้ว + log.csv อยู่ใน records/",
 "",
 "4) ทดสอบหน้างานแบบเห็นภาพสด (มีหน้าต่าง preview + ภาพหลัง threshold)",
 "   python tesr_vision_runner.py --config " + cfg + " --test",
@@ -9792,6 +10284,7 @@ cams,
 "",
 "3) Try it on a still image first",
 "   python tesr_vision_runner.py --config " + cfg + " --image photo.jpg --once",
+"   python tesr_vision_runner.py --config " + cfg + " --image my_photos       <- a whole folder; labelled pictures + log.csv in records/",
 "",
 "4) Test on site with a live preview and the thresholded view",
 "   python tesr_vision_runner.py --config " + cfg + " --test",

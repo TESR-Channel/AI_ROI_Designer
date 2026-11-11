@@ -60,7 +60,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.8.9"
+STUDIO_VERSION = "1.9.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1323,6 +1323,119 @@ def task_yolo_classify(crop, roi):
 
 
 # --------------------------------------------------------------------------
+# task : two AIs - find each object, then count the parts inside it
+# --------------------------------------------------------------------------
+# AI #1 (roi "model") finds every object - a terminal block, a relay, a tray.
+# Each object is cut out with a little slack and AI #2 (roi "part_model")
+# counts its parts - screw heads, pins, cups. An object with the expected
+# count is OK, any other count is NG. Both are ordinary YOLO detectors, so a
+# product with 4 screws or a tray of 30 parts needs no new code, only two
+# models and a number.
+#
+# The browser (ROI Studio) does the same in parts_check_js(); if you change
+# the rule here, change it there, or the preview and the device will disagree.
+
+_PARTS_SEEN = {}      # roi id -> what the last frame found, for the window
+
+
+def drop_inner(items, cover=0.6):
+    """A box lying mostly inside a surer box is the same object seen twice."""
+    kept = []
+    for d in sorted(items, key=lambda d: -d.get("conf", 0)):
+        x1, y1, x2, y2 = d["box"]
+        area = max(1, (x2 - x1) * (y2 - y1))
+        if any(max(0, min(x2, k["box"][2]) - max(x1, k["box"][0])) *
+               max(0, min(y2, k["box"][3]) - max(y1, k["box"][1])) > cover * area for k in kept):
+            continue
+        kept.append(d)
+    return kept
+
+
+def _detect_items(img, model, only):
+    """Every detection of one class, as items, whatever kind of model it is."""
+    m = dict(model or {})
+    if only:
+        m["classes"] = [only]
+    items, _, _ = task_yolo_detect(img, {"model": m, "params": {"output": "items"}})
+    return items or []
+
+
+def parts_verdict(found, want, rule="eq"):
+    return found >= want if rule == "min" else found == want
+
+
+def task_parts_check(crop, roi):
+    p = roi.get("params") or {}
+    want = max(1, int(p.get("count", 1)))
+    pad = float(p.get("pad", 0.1))
+    rule = p.get("rule", "eq")
+    dbg = crop.copy()
+    H, W = crop.shape[:2]
+    objects = drop_inner(_detect_items(crop, roi.get("model"), p.get("object_class")))
+    objects.sort(key=lambda o: (o["box"][0], o["box"][1]))       # left to right
+    seen, counts = [], []
+    for o in objects:
+        x1, y1, x2, y2 = o["box"]
+        px, py = (x2 - x1) * pad, (y2 - y1) * pad
+        a, b = int(max(0, x1 - px)), int(max(0, y1 - py))
+        c, d = int(min(W, x2 + px)), int(min(H, y2 + py))
+        if c - a < 8 or d - b < 8:
+            continue
+        parts = _detect_items(crop[b:d, a:c], roi.get("part_model"), p.get("part_class"))
+        ok = parts_verdict(len(parts), want, rule)
+        boxes = [[q["box"][0] + a, q["box"][1] + b, q["box"][2] + a, q["box"][3] + b] for q in parts]
+        seen.append({"box": [x1, y1, x2, y2], "ok": ok, "found": len(parts), "parts": boxes})
+        counts.append(len(parts))
+        col = (60, 180, 60) if ok else TESR_RED
+        cv2.rectangle(dbg, (x1, y1), (x2, y2), col, 2)
+        for q in boxes:
+            cv2.rectangle(dbg, (q[0], q[1]), (q[2], q[3]), (60, 180, 60), 1)
+        _text(dbg, "%s %d/%d" % ("OK" if ok else "NG", len(parts), want),
+              (x1, max(14, y1 - 5)), 0.55, col, 2)
+    _PARTS_SEEN[roi["id"]] = {"size": (W, H), "objects": seen, "want": want}
+    n_ok = sum(1 for s in seen if s["ok"])
+    result = "none" if not seen else ("OK" if n_ok == len(seen) else "NG")
+    value = {"result": result, "objects": len(seen), "ok": n_ok, "ng": len(seen) - n_ok,
+             "found": counts, "expect": want}
+    conf = float(np.mean([o["conf"] for o in objects])) if objects else 0.0
+    return value, conf, dbg
+
+
+def crop_to_frame(pts, rect, frame_w, frame_h, crop_w, crop_h):
+    """Points measured on crop_roi()'s upright crop, back onto the frame."""
+    src = np.array([[0, 0], [crop_w - 1, 0], [crop_w - 1, crop_h - 1], [0, crop_h - 1]],
+                   dtype=np.float32)
+    M = cv2.getPerspectiveTransform(src, roi_corners(rect, frame_w, frame_h))
+    arr = np.array(pts, dtype=np.float32).reshape(-1, 1, 2)
+    return cv2.perspectiveTransform(arr, M).reshape(-1, 2)
+
+
+def draw_parts(frame, roi):
+    """Green box = OK, red box = NG, with found/expected; a small box per part."""
+    seen = _PARTS_SEEN.get(roi["id"])
+    if not seen or not roi.get("rect"):
+        return
+    h, w = frame.shape[:2]
+    cw, ch = seen["size"]
+    big = max(0.6, min(1.4, h / 700.0))
+    for o in seen["objects"]:
+        x1, y1, x2, y2 = o["box"]
+        q = crop_to_frame([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], roi["rect"], w, h, cw, ch)
+        col = (60, 180, 60) if o["ok"] else TESR_RED
+        cv2.polylines(frame, [q.astype(np.int32)], True, col, 3, cv2.LINE_AA)
+        for b in o["parts"]:
+            c = crop_to_frame([[(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0]], roi["rect"], w, h, cw, ch)[0]
+            r = max(4, int(0.25 * min(b[2] - b[0], b[3] - b[1]) * w / max(1, cw)))
+            cv2.circle(frame, (int(c[0]), int(c[1])), r, (60, 180, 60), 2, cv2.LINE_AA)
+        s = "%s %d/%d" % ("OK" if o["ok"] else "NG", o["found"], seen["want"])
+        tw, th = _text_size(s, big, 2)
+        tx, ty = int(q[:, 0].min()), int(q[:, 1].min()) - 8
+        ty = max(th + 34, ty)
+        _panel(frame, tx - 4, ty - th - 6, tw + 10, th + 12, 0.85)
+        _text(frame, s, (tx + 1, ty), big, col, 2)
+
+
+# --------------------------------------------------------------------------
 # task 4 : barcode / QR
 # --------------------------------------------------------------------------
 
@@ -1974,6 +2087,7 @@ TASKS = {
     "presence_diff": task_presence,
     "color_check": task_color,
     "gauge_needle": task_gauge,
+    "parts_check": task_parts_check,
 }
 
 
@@ -2266,6 +2380,7 @@ TASK_COLOUR = {
     "measure_line": TESR_GOLD,
     "line_count": (110, 220, 250),   # counting gate
     "zone_count": (150, 210, 140),   # occupancy zone
+    "parts_check": (60, 180, 60),    # two AIs: object, then its parts
 }
 
 
@@ -2640,6 +2755,12 @@ def value_text(roi, val):
     """
     if val is None or val == "":
         return "-"
+    if roi.get("task") == "parts_check" and isinstance(val, dict):
+        r = val.get("result", "none")
+        if r == "none":
+            return "-"
+        n = val.get("objects", 0)
+        return r if n <= 1 else "%s %d/%d" % (r, val.get("ok", 0), n)
     if isinstance(val, dict):
         return count_text(roi, val)        # report:"all" hands back the whole dict
     if isinstance(val, (list, tuple)):
@@ -2708,6 +2829,10 @@ def draw_overlay(frame, cam, results, fps, groups=None, show_panel=True, tracks=
         # index tag in the corner, always small enough to fit
         _panel(frame, x0, y0, 18, 14, 0.85)
         _text(frame, str(i), (x0 + 4, y0 + 11), 0.36, TESR_GOLD)
+
+        if roi["task"] == "parts_check":
+            draw_parts(frame, roi)          # each object carries its own OK / NG
+            continue
 
         # the reading itself, inside the box so neighbours never collide
         s = value_text(roi, val)
@@ -3150,6 +3275,123 @@ def run(cfg, args):
 
 
 # --------------------------------------------------------------------------
+# a folder of pictures : every picture once, a labelled copy + log.csv each
+# --------------------------------------------------------------------------
+
+def run_folder(cfg, args):
+    """--image FOLDER: check every picture in it, in name order.
+
+    A picture is read once - there is nothing to settle on a still - and every
+    region's reading is printed on one line. The labelled picture goes to the
+    records folder as 0001_OK_<name>.jpg, with a line in records/log.csv, so
+    what the program decided can be looked at afterwards. With a window, any
+    key shows the next picture and q stops.
+    """
+    cam = pick_camera(cfg, args.camera_id)
+    rt = cfg["runtime"]
+    rois = [r for r in cam.get("rois", []) if r.get("enabled", True)
+            and r.get("task") not in FRAME_TASKS]
+    files = sorted(f for f in os.listdir(args.image) if f.lower().endswith(IMG_EXT))
+    if not files:
+        raise SystemExit("[FATAL] no pictures (%s) in %s" % (" ".join(IMG_EXT), args.image))
+    show = (rt.get("show_window", True) or args.test) and not args.headless and gui_available()
+    out = None if args.no_records else args.records
+    log("version  : runner v%s" % STUDIO_VERSION)
+    log("pictures : %d in %s" % (len(files), args.image))
+    log("rois     : %s" % ", ".join("%s[%s]" % (r["name"], r["task"]) for r in rois))
+    for r in rois:
+        if r.get("task") == "parts_check":
+            q = r.get("params") or {}
+            log("check    : %s - every %s must have %s%d %s"
+                % (r["name"], q.get("object_class") or "object", ">= " if q.get("rule") == "min" else "",
+                   int(q.get("count", 1)), q.get("part_class") or "part"))
+    tesseract_setup(rois, getattr(args, "config", None))
+    text_setup(getattr(args, "config", None))
+    seq, writer, logf = 0, None, None
+    if out:
+        ensure_dir(os.path.join(out, "x"))
+        done = [f for f in os.listdir(out) if f[:4].isdigit()]
+        seq = max([int(f[:4]) for f in done] or [0])
+        new = not os.path.isfile(os.path.join(out, "log.csv"))
+        logf = open(os.path.join(out, "log.csv"), "a", newline="", encoding="utf-8")
+        writer = csv.writer(logf)
+        if new:
+            writer.writerow(["seq", "time", "picture", "result", "roi", "value", "saved_as"])
+        log("records  : %s/ (labelled pictures + log.csv, next #%04d)" % (out, seq + 1))
+    bus = OutputBus(rt, cfg.get("project", "tesr"), cam.get("id", "cam"))
+    tally = {"OK": 0, "NG": 0, "-": 0}
+    try:
+        for name in files:
+            if not RUNNING:
+                break
+            frame = cv2.imread(os.path.join(args.image, name))
+            if frame is None:
+                log("cannot read %s - skipped" % name, "WARN")
+                continue
+            if cam.get("rotate"):
+                code = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
+                        270: cv2.ROTATE_90_COUNTERCLOCKWISE}.get(int(cam["rotate"]))
+                if code is not None:
+                    frame = cv2.rotate(frame, code)
+            results, bits, verdicts = {}, [], []
+            for roi in rois:
+                fn = TASKS.get(roi["task"])
+                if fn is None:
+                    continue
+                crop = crop_roi(frame, roi["rect"], upscale_to=roi.get("upscale_to", 0))
+                try:
+                    value, conf, _ = fn(crop, roi)
+                except Exception as exc:
+                    log("ROI '%s' failed on %s: %s" % (roi["name"], name, exc), "WARN")
+                    continue
+                results[roi["id"]] = {"value": value, "conf": conf}
+                if roi["task"] == "parts_check" and isinstance(value, dict):
+                    if value.get("result") in ("OK", "NG"):
+                        verdicts.append(value["result"])
+                    bits.append("%s = %s  found %s of %d" % (
+                        roi["name"], value.get("result"),
+                        "/".join(str(n) for n in value.get("found") or []) or "0",
+                        value.get("expect", 0)))
+                else:
+                    v = verdict_for(roi, value)
+                    if v:
+                        verdicts.append("OK" if v == "ok" else "NG")
+                    bits.append("%s = %s" % (roi["name"], value_text(roi, value)))
+                bus.publish(roi, roi.get("output_key") or roi["name"], value, conf,
+                            changed=True, echo=False)
+            result = "-" if not verdicts else ("OK" if all(v == "OK" for v in verdicts) else "NG")
+            tally[result] += 1
+            print("[%s] %-22s %s" % (result.ljust(2), name, "   ".join(bits)), flush=True)
+            view = draw_overlay(frame.copy(), cam, results, 0.0, [], not args.no_panel)
+            saved = ""
+            if out:
+                seq += 1
+                saved = "%04d_%s_%s.jpg" % (seq, result if result != "-" else "NA",
+                                            os.path.splitext(name)[0])
+                cv2.imwrite(os.path.join(out, saved), view)
+                for roi in rois:
+                    if roi["id"] in results:
+                        writer.writerow([seq, now_iso(), name, result, roi["name"],
+                                         json.dumps(results[roi["id"]]["value"], ensure_ascii=False),
+                                         saved])
+                logf.flush()
+            if show:
+                h = view.shape[0]
+                small = view if h <= 900 else cv2.resize(view, (int(view.shape[1] * 900 / h), 900))
+                cv2.imshow("TESR Vision Runner", small)
+                if (cv2.waitKey(0) & 0xFF) in (ord("q"), 27):
+                    break
+    finally:
+        if logf:
+            logf.close()
+        bus.close()
+        close_windows()
+    log("done     : %d picture(s) - OK %d, NG %d%s"
+        % (sum(tally.values()), tally["OK"], tally["NG"],
+           (", no verdict %d" % tally["-"]) if tally["-"] else ""))
+
+
+# --------------------------------------------------------------------------
 # calibrate mode : live trackbars, prints the values to paste back in the JSON
 # --------------------------------------------------------------------------
 
@@ -3282,7 +3524,13 @@ def main():
     ap.add_argument("--frame-every", dest="frame_every", type=float, metavar="SEC",
                     help="with MQTT on: send the camera picture every SEC seconds on "
                          "<prefix>/<camera>/frame (default 0.25 with --broker; 0 = never)")
-    ap.add_argument("--image", help="run on a single image file")
+    ap.add_argument("--image", help="run on one picture, or on every picture in a folder "
+                    "(a labelled copy of each goes to --records)")
+    ap.add_argument("--records", default="records", metavar="DIR",
+                    help="with --image FOLDER: where the labelled pictures and log.csv go "
+                    "(default records)")
+    ap.add_argument("--no-records", dest="no_records", action="store_true",
+                    help="with --image FOLDER: print only, save nothing")
     ap.add_argument("--once", action="store_true",
                     help="read until every ROI has settled (stable_frames), print one JSON, exit")
     ap.add_argument("--test", action="store_true", help="show preview window + ROI debug panel")
@@ -3347,6 +3595,10 @@ def main():
 
     if args.calibrate:
         calibrate(cfg, args)
+        return 0
+
+    if args.image and os.path.isdir(args.image):
+        run_folder(cfg, args)
         return 0
 
     run(cfg, args)
