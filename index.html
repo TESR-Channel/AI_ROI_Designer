@@ -565,7 +565,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.9.1"
+STUDIO_VERSION = "1.9.2"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -4880,7 +4880,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.9.1";
+const STUDIO_VERSION = "1.9.2";
 
 const I18N = {
 th: {
@@ -5012,6 +5012,7 @@ th: {
   pcWhole:"ใช้ทั้งภาพ", pcNeedModels:"เลือกโมเดลให้ครบทั้ง AI #1 และ AI #2 ก่อน",
   pcNoObject:"ไม่เจอวัตถุ", pcConf1:"conf AI #1", pcConf2:"conf AI #2",
   picOf:"รูป", picKeys:"← → เปลี่ยนรูป ทุกกรอบอ่านใหม่ให้เอง",
+  picSkipped:"ข้าม {n} ไฟล์ที่เบราว์เซอร์เปิดไม่ได้ (เช่น HEIC จาก iPhone) — ใช้ JPG / PNG",
 
   /* task params */
   pDigits:"จำนวนหลักในกรอบนี้", pDecimals:"ทศนิยม",
@@ -5299,6 +5300,7 @@ en: {
   pcWhole:"Use the whole picture", pcNeedModels:"Pick both models, AI #1 and AI #2, first",
   pcNoObject:"no object found", pcConf1:"conf AI #1", pcConf2:"conf AI #2",
   picOf:"picture", picKeys:"← → change picture, every ROI is read again",
+  picSkipped:"Skipped {n} file(s) the browser cannot open (e.g. iPhone HEIC) — use JPG / PNG",
 
   pDigits:"Digits in this ROI", pDecimals:"Decimals",
   digitsHint:"Defaults to <b>1 digit</b> — one ROI per digit copes best with uneven lighting and camera angle. To read a whole reading in one box, set the real digit count, e.g. 4.",
@@ -6872,7 +6874,7 @@ function setBackground(dataUrl){
     if(pics.pending) picsLoaded();
     else toast(t("imgLoaded") + im.naturalWidth + "×" + im.naturalHeight);
   };
-  im.onerror = () => toast(t("imgFailed"));
+  im.onerror = () => { pics.pending = false; toast(t("imgFailed")); };
   im.src = dataUrl;
 }
 function shrink(img, max){
@@ -6888,8 +6890,10 @@ function readFile(file){
     const probe = new Image();
     probe.onload = () => setBackground(Math.max(probe.naturalWidth, probe.naturalHeight) > 1920
       ? shrink(probe, 1920) : fr.result);
+    probe.onerror = () => { pics.pending = false; toast(t("imgFailed")); };
     probe.src = fr.result;
   };
+  fr.onerror = () => { pics.pending = false; toast(t("imgFailed")); };
   fr.readAsDataURL(file);
 }
 P("btnFileTop").onclick = () => P("fileImage").click();
@@ -6929,9 +6933,14 @@ document.addEventListener("keydown", e => {
   if(e.key === "ArrowLeft"){ showPic(pics.i - 1); e.preventDefault(); }
 });
 P("fileImage").onchange = e => {
-  const list = [...e.target.files].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|bmp|webp)$/i.test(f.name))
+  // A phone's HEIC/HEIF photo is an image/* file the browser cannot draw: left
+  // in, the arrows stopped on it with nothing read. Keep what a page can open.
+  const all = [...e.target.files];
+  const list = all.filter(f => /\.(jpe?g|png|bmp|webp|gif)$/i.test(f.name) ||
+                               (/^image\/(jpeg|png|bmp|webp|gif)$/.test(f.type) && !/\.(heic|heif)$/i.test(f.name)))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric:true}));
   e.target.value = "";
+  if(all.length > list.length) toast(t("picSkipped").replace("{n}", all.length - list.length));
   if(!list.length) return;
   pics.list = list.length > 1 ? list : [];
   P("picNav").style.display = list.length > 1 ? "inline-flex" : "none";
