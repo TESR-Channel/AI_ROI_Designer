@@ -565,7 +565,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.9.2"
+STUDIO_VERSION = "1.10.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -4880,7 +4880,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.9.2";
+const STUDIO_VERSION = "1.10.0";
 
 const I18N = {
 th: {
@@ -9982,7 +9982,13 @@ function projectReadme(cfgName, mdls){
     "  nothing to add again, edit and export as before.",
     "",
     "TO RUN IT",
-    "  Unzip the whole thing into one folder, cd into it and run from there.",
+    "  Unzip the whole thing into one folder, then install once - it makes",
+    "  venv/ in that folder with only what this project needs:",
+    "    Windows        double-click install_windows.bat",
+    "    Linux / macOS  bash install_linux.sh",
+    "    Raspberry Pi   bash install_pi.sh       Jetson  bash install_jetson.sh",
+    "  Then open the venv (venv\\Scripts\\activate  or  source venv/bin/activate),",
+    "  cd into the folder and run from there.",
     "  The model path in the config is relative, and the runner opens it from",
     "  the folder you RUN the command in (the current directory) - not from",
     "  the runner's folder and not from the config's folder. Logs and captures",
@@ -10012,8 +10018,104 @@ function projectReadme(cfgName, mdls){
     (m.names.length ? m.names.length + " classes: " + m.names.join(", ") : "no class names") +
     ", imgsz " + m.size));
   if(!mdls.length) lines.push("  (no model is attached to any region)");
-  lines.push("", "Install once:  pip install opencv-python numpy onnxruntime", "");
+  lines.push("  requirements.txt + install_*.bat / .sh   install once (see TO RUN IT)", "");
   return lines.join("\n");
+}
+
+/* The export is the whole kit: one double-click (or one bash line) makes a
+   venv INSIDE the unzipped folder, installs only what this project uses and
+   prints the commands for this config. Nothing has to be prepared before. */
+function exportNeeds(mdls){
+  const rois = [].concat(...state.cameras.map(c => c.rois || []));
+  const ocrR = rois.filter(r => r.task === "ocr_text" || r.task === "plate_ocr");
+  const langs = [...new Set([].concat(...ocrR.map(r =>
+    String((r.params && r.params.lang) || "eng").split("+"))).filter(Boolean))];
+  return {onnx: mdls.length > 0 || state.cameras.some(c => c.detector && c.detector.id),
+          ocr: ocrR.length > 0, langs};
+}
+function installEntries(cfgName, mdls){
+  const enc = new TextEncoder(), need = exportNeeds(mdls);
+  const head = "TESR ROI Studio v" + STUDIO_VERSION + " - " + cfgName;
+  const pipMain = ["opencv-python", "numpy"].concat(need.onnx ? ["onnxruntime"] : [], ["paho-mqtt"]);
+  const pipDev = (need.onnx ? ["onnxruntime"] : []).concat(["paho-mqtt"]);   // Pi / Jetson: OpenCV + NumPy from apt
+  const req = ["# " + head,
+    "# opencv + numpy = the picture" + (need.onnx ? ", onnxruntime = the .onnx model(s)" : "") +
+    ", paho-mqtt = --broker (Node-RED)"].concat(pipMain).concat(need.ocr
+      ? ["# OCR: tesserocr has Tesseract inside (no separate install), pillow draws Thai on the window",
+         "tesserocr", "pillow"] : []).join("\n") + "\n";
+  const lang = need.langs.join("+");
+  const runs = [
+    "python tesr_vision_runner.py --config " + cfgName + " --image photo.jpg --once",
+    "python tesr_vision_runner.py --config " + cfgName + " --image my_photos",
+    "python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 0",
+    "python tesr_vision_runner.py --config " + cfgName + " --camera usb --source 0 --broker 192.168.1.50"];
+  const shTail = (act, py) => [
+    'python -c "import cv2, numpy' + (need.onnx ? ', onnxruntime' : '') + '; print(\'OK - OpenCV\', cv2.__version__)"',
+    need.ocr ? "python tesr_vision_runner.py --get-lang " + lang + " || echo \"(OCR language data: run that line again with internet)\"" : "",
+    "echo", 'echo "Done! Every time you open a new terminal:"', 'echo "  ' + act + '"',
+    'echo "  cd $(pwd)"']
+    .concat(runs.map(r => 'echo "  ' + r.replace(/^python /, py + " ") + '"'))
+    .concat(['echo "  (another webcam: --source 1, 2 ; ribbon camera: --camera csi ; network: --camera ip --source rtsp://...)"'])
+    .filter(Boolean);
+  const ocrLine = need.ocr ? ["pip install tesserocr pillow || echo \"tesserocr has no wheel here: pip install pytesseract pillow and install Tesseract\""] : [];
+  const linux = ["#!/usr/bin/env bash",
+    "# " + head + " - installer for a Linux / macOS PC",
+    "# Raspberry Pi -> install_pi.sh    Jetson -> install_jetson.sh    Windows -> install_windows.bat",
+    "# Makes venv/ in THIS folder (next to the config) and installs only what this project needs.",
+    "set -e", 'cd "$(dirname "$0")"',
+    "python3 -m venv venv", ". venv/bin/activate",
+    "python -m pip install --upgrade pip",
+    "pip " + "install " + pipMain.join(" ")].concat(ocrLine)
+    .concat(shTail("source venv/bin/activate", "python")).join("\n") + "\n";
+  const pi = ["#!/usr/bin/env bash",
+    "# " + head + " - installer for Raspberry Pi 5 (Raspberry Pi OS 64-bit)",
+    "# OpenCV, NumPy and Picamera2 come from apt (Picamera2 cannot be pip-installed); the venv sees",
+    "# them through --system-site-packages. Never \"sudo pip3 install\" - Bookworm refuses (PEP 668).",
+    "set -e", 'cd "$(dirname "$0")"',
+    '[ "$(uname -m)" = "aarch64" ] || echo "WARNING: not a 64-bit OS ($(uname -m)) - onnxruntime needs 64-bit Raspberry Pi OS"',
+    "sudo apt update",
+    "sudo apt install -y python3-venv python3-opencv python3-numpy python3-picamera2",
+    "python3 -m venv --system-site-packages venv", ". venv/bin/activate",
+    "pip install --upgrade pip",
+    "pip install " + pipDev.join(" ")].concat(ocrLine)
+    .concat(shTail("source venv/bin/activate", "python")).join("\n") + "\n";
+  const jet = ["#!/usr/bin/env bash",
+    "# " + head + " - installer for NVIDIA Jetson (Orin Nano / Orin NX / AGX Orin)",
+    "# Uses the system OpenCV (it has GStreamer, which a CSI camera needs) through --system-site-packages.",
+    "# pip's onnxruntime is a CPU build: measure it on the device first. A Jetson Nano is more limited",
+    "# than an Orin Nano (older JetPack, fewer builds) - expect to pin older versions there.",
+    "set -e", 'cd "$(dirname "$0")"',
+    '[ -f /etc/nv_tegra_release ] && echo "L4T: $(head -n1 /etc/nv_tegra_release)"',
+    "sudo apt update",
+    "sudo apt install -y python3-venv python3-pip python3-numpy",
+    'python3 -c "import cv2" 2>/dev/null || sudo apt install -y python3-opencv',
+    "python3 -m venv --system-site-packages venv", ". venv/bin/activate",
+    "pip install --upgrade pip",
+    "pip install " + pipDev.join(" ") + ' || { echo "pip could not install this for $(python3 -V): install the Jetson build of onnxruntime for your JetPack, then run again"; exit 1; }']
+    .concat(ocrLine).concat(shTail("source venv/bin/activate", "python")).join("\n") + "\n";
+  const win = ["@echo off",
+    "REM " + head + " - one-click installer (Windows)",
+    "REM Makes venv\\ in THIS folder (next to the config) and installs only what this project needs.",
+    "setlocal", 'cd /d "%~dp0"',
+    'set "PY=python"', 'py -3 -c "print()" >nul 2>nul && set "PY=py -3"', "echo Using: %PY%",
+    "%PY% -m venv venv || goto err", "call venv\\Scripts\\activate.bat",
+    "python -m pip install --upgrade pip",
+    "pip install " + pipMain.join(" ") + " || goto err"]
+    .concat(need.ocr ? ["pip install tesserocr pillow || echo tesserocr failed - OCR regions will not read"] : [])
+    .concat(['python -c "import cv2, numpy' + (need.onnx ? ', onnxruntime' : '') + '; print(\'OK - OpenCV\', cv2.__version__)" || goto err'])
+    .concat(need.ocr ? ["python tesr_vision_runner.py --get-lang " + lang] : [])
+    .concat(["echo.", "echo ============================================",
+      "echo  Done! Every time you open a new window:", "echo    venv\\Scripts\\activate", "echo    cd /d %~dp0"])
+    .concat(runs.map(r => "echo    " + r))
+    .concat(["echo    (another webcam: --source 1, 2 ; network camera: --camera ip --source rtsp://...)",
+      "echo ============================================", "pause", "exit /b 0", ":err", "echo.",
+      "echo Install failed - you need Python 3.8 or newer from python.org (tick Add to PATH).",
+      "pause", "exit /b 1"]).join("\r\n") + "\r\n";
+  return [{name: "requirements.txt", data: enc.encode(req)},
+          {name: "install_windows.bat", data: enc.encode(win)},
+          {name: "install_linux.sh", data: enc.encode(linux)},
+          {name: "install_pi.sh", data: enc.encode(pi)},
+          {name: "install_jetson.sh", data: enc.encode(jet)}];
 }
 
 async function exportAll(){
@@ -10049,6 +10151,7 @@ async function exportAll(){
   if(needsLineEngine())
     entries.push({name: "tesr_line_engine.py",
                   data: enc.encode(document.getElementById("lineSrc").textContent)});
+  installEntries(cfgName, mdls).forEach(e => entries.push(e));
   entries.push({name: "README.txt", data: enc.encode(projectReadme(cfgName, mdls))});
 
   const blob = zipWrite(entries);
@@ -10244,13 +10347,11 @@ modelLines.join("\n"),
 "กล้องในไฟล์นี้",
 cams,
 "",
-"1) ติดตั้ง (ทำครั้งเดียว)",
-"   python -m pip install --upgrade pip",
-"   python -m pip install opencv-python numpy",
-"   # ถ้ามี ROI ที่ใช้โมเดล .onnx : pip install onnxruntime",
-"   # ถ้าจะใช้ OCR / ป้ายทะเบียน   : pip install tesserocr pillow   (มี Tesseract ในตัว ไม่ต้องลงโปรแกรมแยก · pillow = ป้ายภาษาไทยบนหน้าต่าง)",
-"   # ถ้าจะส่ง MQTT               : pip install paho-mqtt",
-"   # Raspberry Pi                : sudo apt install python3-opencv  แทน pip ได้ ถ้า build ช้า",
+"1) ติดตั้ง (ทำครั้งเดียว) — ตัวติดตั้งอยู่ใน zip แล้ว สร้าง venv ในโฟลเดอร์นี้ ลงเฉพาะที่โปรเจกต์นี้ใช้",
+"   Windows       ดับเบิลคลิก install_windows.bat",
+"   Linux / Mac   bash install_linux.sh",
+"   Raspberry Pi  bash install_pi.sh        Jetson  bash install_jetson.sh",
+"   แล้วเปิด venv ทุกครั้งก่อนรัน:  venv\\Scripts\\activate   หรือ   source venv/bin/activate",
 "",
 "2) ตรวจว่าโปรแกรมอ่านเลขได้ (ไม่ต้องมีกล้อง)",
 "   python tesr_vision_runner.py --selftest",
@@ -10304,13 +10405,11 @@ modelLines.join("\n"),
 "Cameras in this config",
 cams,
 "",
-"1) Install (once)",
-"   python -m pip install --upgrade pip",
-"   python -m pip install opencv-python numpy",
-"   # if any ROI uses an .onnx model : pip install onnxruntime",
-"   # if you use OCR / plates        : pip install tesserocr pillow   (Tesseract inside, nothing else to install · pillow draws Thai labels on the window)",
-"   # if you publish to MQTT         : pip install paho-mqtt",
-"   # Raspberry Pi                   : sudo apt install python3-opencv is faster than building from pip",
+"1) Install (once) — the installers are in the zip; they make venv/ in this folder with only what this project uses",
+"   Windows       double-click install_windows.bat",
+"   Linux / Mac   bash install_linux.sh",
+"   Raspberry Pi  bash install_pi.sh        Jetson  bash install_jetson.sh",
+"   then open the venv before each run:  venv\\Scripts\\activate   or   source venv/bin/activate",
 "",
 "2) Check the reader works, no camera needed",
 "   python tesr_vision_runner.py --selftest",
