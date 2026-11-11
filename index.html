@@ -565,7 +565,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.9.0"
+STUDIO_VERSION = "1.9.1"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -4880,7 +4880,7 @@ if __name__ == "__main__":
 // The one place the version is written down. It goes on the header, into
 // every exported config, and the runner prints its own copy at startup, so
 // a mismatch announces itself instead of being guessed at.
-const STUDIO_VERSION = "1.9.0";
+const STUDIO_VERSION = "1.9.1";
 
 const I18N = {
 th: {
@@ -7452,6 +7452,32 @@ function autoTune(grayFull, wFull, hFull, base){
 
 /* Letterbox: resize keeping aspect ratio, pad the rest with grey.
    Returns the CHW float tensor plus the mapping needed to put boxes back. */
+/* The same letterbox, resized by the canvas with smoothing on - bilinear, as
+   cv2.INTER_LINEAR is in the runner. The nearest-pixel loop below picks one
+   source pixel per model pixel, which on a small crop (one relay cut out of the
+   picture) changed what the model saw enough to find a screw head twice where
+   the runner found it once. Same size, same offsets, same grey as _letterbox(). */
+function letterboxCanvas(src, size, pad){
+  const sw = src.width, sh = src.height;
+  const scale = Math.min(size / sw, size / sh);
+  const nw = Math.round(sw * scale), nh = Math.round(sh * scale);
+  const dx = Math.floor((size - nw) / 2), dy = Math.floor((size - nh) / 2);
+  const c = document.createElement("canvas");
+  c.width = size; c.height = size;
+  const g = c.getContext("2d", {willReadFrequently:true});
+  const grey = pad === undefined ? 114 : pad;
+  g.fillStyle = "rgb(" + grey + "," + grey + "," + grey + ")";
+  g.fillRect(0, 0, size, size);
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = "low";
+  g.drawImage(src, 0, 0, sw, sh, dx, dy, nw, nh);
+  const d = g.getImageData(0, 0, size, size).data, area = size * size;
+  const t = new Float32Array(3 * area);
+  for(let i = 0, j = 0; j < area; i += 4, j++){
+    t[j] = d[i] / 255; t[area + j] = d[i + 1] / 255; t[2 * area + j] = d[i + 2] / 255;
+  }
+  return {data: t, size, scale, dx, dy};
+}
 function letterbox(rgba, sw, sh, size, pad){
   const scale = Math.min(size / sw, size / sh);
   const nw = Math.round(sw * scale), nh = Math.round(sh * scale);
@@ -8585,10 +8611,8 @@ async function runModel(model, canvas, region){
   const rm = region || {};
   const ort = await loadOrt();
   const session = await getSession(model);
-  const g = canvas.getContext("2d", {willReadFrequently:true});
-  const img = g.getImageData(0, 0, canvas.width, canvas.height);
   const size = +model.size || (model.type === "classify" ? 224 : 640);
-  const lb = letterbox(img.data, canvas.width, canvas.height, size);
+  const lb = letterboxCanvas(canvas, size);
   const feeds = {};
   feeds[session.inputNames[0]] = new ort.Tensor("float32", lb.data, [1, 3, size, size]);
   const res = await session.run(feeds);
