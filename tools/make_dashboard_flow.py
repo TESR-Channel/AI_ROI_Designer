@@ -119,13 +119,13 @@ COUNT = r"""<style>
 <div style="font-size:12px; opacity:.7">นับตั้งแต่ {{msg.payload.since || '-'}} · นับ 1 ชิ้นเมื่อชิ้นงานเข้ามา (หลัง &quot;ไม่มีชิ้นงาน&quot;) · ผลเปลี่ยนระหว่างอยู่ใต้กล้อง = แก้ผลชิ้นเดิม</div>
 """
 
-LAST_NG = r"""<div style="text-align:center">
+LAST_NG = r"""<div style="text-align:center; overflow:hidden">
   <div ng-if="!msg.payload || !msg.payload.time" style="padding:30px 0; opacity:.6">ยังไม่มี NG</div>
   <div ng-if="msg.payload && msg.payload.time">
     <img ng-if="msg.payload.pic" ng-src="data:image/jpeg;base64,{{msg.payload.pic}}"
-         style="width:100%; height:240px; object-fit:contain; background:#0f172a; border-radius:10px; border:4px solid #dc2626; display:block; box-sizing:border-box">
+         style="width:100%; height:200px; object-fit:contain; background:#0f172a; border-radius:10px; border:4px solid #dc2626; display:block; box-sizing:border-box">
     <div style="font-size:20px; font-weight:700; color:#dc2626; margin-top:6px">
-      NG {{msg.payload.found}} / {{msg.payload.expect}} · {{msg.payload.roi}}</div>
+      NG {{msg.payload.found}} · {{msg.payload.roi}}</div>
     <div style="font-size:13px; opacity:.7">{{msg.payload.time}}</div>
   </div>
 </div>
@@ -140,7 +140,7 @@ HIST = r"""<style>
 <table class="tv-t" ng-if="msg.payload.length">
   <tr><th>เวลา</th><th>ผล</th><th>นับได้ (ต่อชิ้น)</th><th>กรอบ</th></tr>
   <tr ng-repeat="h in msg.payload"><td>{{h.time}}</td><td ng-class="h.result">{{h.result}}</td>
-      <td>{{h.found}} / {{h.expect}}</td><td>{{h.roi}}</td></tr>
+      <td>{{h.found}}</td><td>{{h.roi}}</td></tr>
 </table>
 """
 
@@ -178,7 +178,7 @@ if (parts) {
     const c = flow.get("qc") || {ok: 0, ng: 0, since: time};
     let hist = flow.get("hist") || [];
     const vis = visits[card.id];
-    const found = (v.found || []).join(" / ");
+    const found = (v.found || []).map(n => n + "/" + v.expect).join(" · ");
     const row = {time: time.slice(11), result: v.result, found, expect: v.expect, roi: r.roi};
     if (v.result === "none") {
         delete visits[card.id];
@@ -192,6 +192,12 @@ if (parts) {
             if (vis.result !== v.result) {
                 c[vis.result === "OK" ? "ok" : "ng"] -= 1;
                 c[v.result === "OK" ? "ok" : "ng"] += 1;
+                // a short NG that turned OK on the same part was not a real NG: put the
+                // "last NG" panel back the way it was before this part came
+                if (v.result === "OK" && vis.ngBefore !== undefined) {
+                    flow.set("lastng", vis.ngBefore || null);
+                    out[3] = {payload: vis.ngBefore || {}};
+                }
                 vis.result = v.result;
             }
             const i = hist.findIndex(h => h.roi === r.roi && h.time === vis.at);
@@ -203,10 +209,17 @@ if (parts) {
         out[1] = {payload: c};
         out[2] = {payload: hist};
         if (v.result === "NG") {
-            // the picture is sent 4 times a second - wait for one taken AFTER this reading
-            const cam = r.camera, ng = {time, roi: r.roi, found, expect: v.expect};
-            setTimeout(() => node.send([null, null, null,
-                {payload: Object.assign(ng, {pic: (flow.get("pics") || {})[cam] || null})}]), 600);
+            const vv = visits[card.id];
+            if (vv.ngBefore === undefined) vv.ngBefore = flow.get("lastng") || null;
+            // the picture is sent 4 times a second - take the next one, after this reading
+            const cam = r.camera, id = card.id, ng = {time, roi: r.roi, found};
+            setTimeout(() => {
+                const now = (flow.get("visits") || {})[id];
+                if (!now || now.result !== "NG") return;          // already corrected to OK
+                ng.pic = (flow.get("pics") || {})[cam] || null;
+                flow.set("lastng", ng);
+                node.send([null, null, null, {payload: ng}]);
+            }, 300);
         }
         node.status({fill: v.result === "OK" ? "green" : "red", shape: "dot",
                      text: "OK " + c.ok + " · NG " + c.ng + " (now " + v.result + " " + found + "/" + v.expect + ")"});
@@ -223,6 +236,7 @@ const c = {ok: 0, ng: 0, yield: 0, since: new Date().toLocaleString("en-GB")};
 flow.set("qc", c);
 flow.set("hist", []);
 flow.set("visits", {});
+flow.set("lastng", null);
 node.status({fill: "grey", shape: "ring", text: "counts reset " + c.since});
 return [{payload: c}, {payload: []}, {payload: {}}];
 """
