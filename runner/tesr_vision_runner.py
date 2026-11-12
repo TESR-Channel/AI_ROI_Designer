@@ -60,7 +60,7 @@ SCHEMA = "tesr.roi.v1"
 # same number into every config it exports, and load_config() below says so
 # out loud when the two do not match - guessing whether your files are in
 # step is not a thing anybody should have to do.
-STUDIO_VERSION = "1.10.2"
+STUDIO_VERSION = "1.11.0"
 
 # The line and zone engine lives in its own module so it can be tested on its
 # own; the runner works with or without it present.
@@ -1166,6 +1166,7 @@ def task_plate(crop, roi):
 _MODELS = {}
 _ORT = {}
 _STRETCH = {}      # id(session) -> True when the model wants a plain resize
+_OBB = {}          # id(session) -> True for a rotated-box (OBB) model: last channel = angle
 
 
 def _letterbox(img, size, pad=114):
@@ -1224,6 +1225,35 @@ def _nms(boxes, scores, classes, iou_thr):
     return keep
 
 
+def _poly_iou(a, b):
+    """IoU of two convex quadrilaterals (rotated boxes)."""
+    a = np.asarray(a, np.float32).reshape(-1, 2)
+    b = np.asarray(b, np.float32).reshape(-1, 2)
+    inter, _ = cv2.intersectConvexConvex(a, b)
+    union = abs(cv2.contourArea(a)) + abs(cv2.contourArea(b)) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _nms_poly(polys, scores, classes, iou_thr):
+    """NMS for rotated boxes: neighbours that lean the same way overlap far less
+    than their upright boxes do, so compare the real shapes."""
+    order = list(np.argsort(-scores))
+    keep = []
+    while order:
+        i = order.pop(0)
+        keep.append(i)
+        order = [j for j in order if classes[j] != classes[i] or _poly_iou(polys[i], polys[j]) <= iou_thr]
+    return keep
+
+
+def obb_corners(cx, cy, w, h, a):
+    """Corners of a rotated rectangle (angle a in radians, clockwise on screen)."""
+    c, s = np.cos(a), np.sin(a)
+    dx = np.array([-w, w, w, -w]) / 2.0
+    dy = np.array([-h, -h, h, h]) / 2.0
+    return np.stack([cx + dx * c - dy * s, cy + dx * s + dy * c], axis=1)
+
+
 def get_onnx(path):
     """Load an ONNX model with onnxruntime only. Much lighter than Ultralytics,
     which matters on a Raspberry Pi."""
@@ -1257,6 +1287,13 @@ def get_onnx(path):
     if "stretch" in pre.lower():
         _STRETCH[id(sess)] = True
         log("  %s wants a plain resize (stretch), not a letterbox" % os.path.basename(path))
+    try:
+        mtask = sess.get_modelmeta().custom_metadata_map.get("task", "")
+    except Exception:
+        mtask = ""
+    if mtask.lower() == "obb":
+        _OBB[id(sess)] = True
+        log("  %s draws rotated boxes (OBB)" % os.path.basename(path))
     _ORT[path] = sess
     return sess
 
@@ -1273,7 +1310,8 @@ def onnx_detect(crop, roi):
     pred = np.squeeze(out)                       # (4+nc, N) or (N, 4+nc)
     if pred.shape[0] < pred.shape[1]:
         pred = pred.T                            # -> (N, 4+nc)
-    nc = pred.shape[1] - 4
+    obb = _OBB.get(id(sess), False)
+    nc = pred.shape[1] - (5 if obb else 4)      # OBB: cx cy w h, scores, angle
     scores = pred[:, 4:4 + nc]
     cls = np.argmax(scores, axis=1)
     conf = scores[np.arange(len(cls)), cls]
@@ -1281,21 +1319,35 @@ def onnx_detect(crop, roi):
     pred, cls, conf = pred[keep], cls[keep], conf[keep]
 
     names = m.get("class_names") or []
+    wanted = m.get("classes") or []
     items = []
     if len(pred):
         cx, cy, bw, bh = pred[:, 0], pred[:, 1], pred[:, 2], pred[:, 3]
-        boxes = np.stack([(cx - bw / 2 - dx) / sx, (cy - bh / 2 - dy) / sy,
-                          (cx + bw / 2 - dx) / sx, (cy + bh / 2 - dy) / sy], axis=1)
-        for i in _nms(boxes, conf, cls, float(m.get("iou", 0.45))):
+        if obb:
+            polys = []
+            for k in range(len(pred)):
+                q = obb_corners(cx[k], cy[k], bw[k], bh[k], pred[k, -1])
+                polys.append(np.stack([(q[:, 0] - dx) / sx, (q[:, 1] - dy) / sy], axis=1))
+            order = _nms_poly(polys, conf, cls, float(m.get("iou", 0.45)))
+        else:
+            boxes = np.stack([(cx - bw / 2 - dx) / sx, (cy - bh / 2 - dy) / sy,
+                              (cx + bw / 2 - dx) / sx, (cy + bh / 2 - dy) / sy], axis=1)
+            order = _nms(boxes, conf, cls, float(m.get("iou", 0.45)))
+        for i in order:
             name = names[cls[i]] if cls[i] < len(names) else str(int(cls[i]))
-            wanted = m.get("classes") or []
             if wanted and name not in wanted:
                 continue
-            x1, y1, x2, y2 = [int(v) for v in boxes[i]]
-            items.append({"class": name, "conf": round(float(conf[i]), 3),
-                          "box": [x1, y1, x2, y2]})
-            cv2.rectangle(dbg, (x1, y1), (x2, y2), (6, 0, 243), 2)
-            _text(dbg, "%s %.2f" % (name, conf[i]), (x1, max(12, y1 - 4)), 0.4, (6, 0, 243))
+            it = {"class": name, "conf": round(float(conf[i]), 3)}
+            if obb:
+                q = polys[i]
+                it["box"] = [int(q[:, 0].min()), int(q[:, 1].min()), int(q[:, 0].max()), int(q[:, 1].max())]
+                it["poly"] = [[int(round(x)), int(round(y))] for x, y in q]
+                cv2.polylines(dbg, [np.array(it["poly"], np.int32)], True, (6, 0, 243), 2, cv2.LINE_AA)
+            else:
+                it["box"] = [int(v) for v in boxes[i]]
+                cv2.rectangle(dbg, tuple(it["box"][:2]), tuple(it["box"][2:]), (6, 0, 243), 2)
+            items.append(it)
+            _text(dbg, "%s %.2f" % (name, conf[i]), (it["box"][0], max(12, it["box"][1] - 4)), 0.4, (6, 0, 243))
 
     p = roi.get("params") or {}
     mode = p.get("output", "count")
@@ -1354,17 +1406,28 @@ def task_yolo_detect(crop, roi):
                         imgsz=int(m.get("imgsz", 640)), verbose=False)[0]
     keep = m.get("classes") or []
     items, confs = [], []
-    for b in res.boxes:
-        cid = int(b.cls[0])
+    obb = getattr(res, "obb", None)
+    if obb is not None and len(obb):            # rotated-box model (yolov8n-obb ...)
+        dets = [(int(c), float(f), q.tolist()) for c, f, q in
+                zip(obb.cls.tolist(), obb.conf.tolist(), obb.xyxyxyxy.cpu().numpy())]
+    else:
+        dets = [(int(b.cls[0]), float(b.conf[0]), [int(v) for v in b.xyxy[0]]) for b in res.boxes]
+    for cid, cf, geo in dets:
         name = res.names.get(cid, str(cid))
         if keep and name not in keep and cid not in keep:
             continue
-        cf = float(b.conf[0])
-        x1, y1, x2, y2 = [int(v) for v in b.xyxy[0]]
-        items.append({"class": name, "conf": round(cf, 3), "box": [x1, y1, x2, y2]})
+        it = {"class": name, "conf": round(cf, 3)}
+        if len(geo) == 4 and not isinstance(geo[0], list):
+            it["box"] = geo
+            cv2.rectangle(dbg, tuple(geo[:2]), tuple(geo[2:]), (6, 0, 243), 2)               # TESR red
+        else:
+            it["poly"] = [[int(round(x)), int(round(y))] for x, y in geo]
+            xs, ys = [p[0] for p in it["poly"]], [p[1] for p in it["poly"]]
+            it["box"] = [min(xs), min(ys), max(xs), max(ys)]
+            cv2.polylines(dbg, [np.array(it["poly"], np.int32)], True, (6, 0, 243), 2, cv2.LINE_AA)
+        items.append(it)
         confs.append(cf)
-        cv2.rectangle(dbg, (x1, y1), (x2, y2), (6, 0, 243), 2)               # TESR red
-        _text(dbg, "%s %.2f" % (name, cf), (x1, max(12, y1 - 4)), 0.4, (6, 0, 243))
+        _text(dbg, "%s %.2f" % (name, cf), (it["box"][0], max(12, it["box"][1] - 4)), 0.4, (6, 0, 243))
     p = roi.get("params") or {}
     if p.get("output", "count") == "count":
         value = len(items)
@@ -1405,6 +1468,98 @@ def task_yolo_classify(crop, roi):
 # the rule here, change it there, or the preview and the device will disagree.
 
 _PARTS_SEEN = {}      # roi id -> what the last frame found, for the window
+_PARTS_TRACK = {}     # roi id -> objects followed over the last frames (live camera / video)
+_PARTS_STILL = [False]  # --image FOLDER: every picture stands alone, nothing to smooth
+
+
+def _iou(a, b):
+    iw = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    ih = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = iw * ih
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / float(union) if union > 0 else 0.0
+
+
+def _blend_poly(old, new, k=0.5):
+    """Running average of two rotated boxes: corners paired the way that fits best
+    (the same corner can come first in one frame and second in the next)."""
+    if not old or not new:
+        return new or old
+    o, n = np.asarray(old, float), np.asarray(new, float)
+    best = min(range(4), key=lambda r: np.abs(np.roll(n, r, axis=0) - o).sum())
+    return ((1 - k) * o + k * np.roll(n, best, axis=0)).tolist()
+
+
+def smooth_parts(rid, seen, want, rule, window, hold):
+    """Steady answers on a live camera: follow each object over the last frames.
+
+    A detector that is right 9 frames in 10 still flips OK 4/4 -> NG 3/4 for a
+    frame now and then, and the box shakes by a few pixels. Each object found
+    by AI #1 is matched to the one at the same place in the previous frames;
+    its count is the most common count of the last `window` frames, its box a
+    running average, and an object that AI #1 misses for up to `hold` frames
+    stays on screen. window 1 = off: every frame on its own, as before.
+    The browser does the same in smoothPartsJS()."""
+    if window <= 1:
+        return seen
+    tracks = _PARTS_TRACK.setdefault(rid, [])
+    used, fresh = set(), []
+    for o in sorted(seen, key=lambda d: -d["found"]):
+        best, bi = None, 0.3
+        for t in tracks:
+            if id(t) not in used and _iou(t["box"], o["box"]) > bi:
+                best, bi = t, _iou(t["box"], o["box"])
+        if best is None:
+            fresh.append(o)
+            continue
+        used.add(id(best))
+        best["box"] = [0.5 * a + 0.5 * b for a, b in zip(best["box"], o["box"])]
+        best["poly"] = _blend_poly(best.get("poly"), o.get("poly"))
+        best["counts"] = (best["counts"] + [o["found"]])[-window:]
+        best["parts"][o["found"]] = o["parts"]
+        best["hits"] += 1
+        best["miss"] = 0
+    for o in fresh:
+        # moved too far for the boxes to overlap (picked up, swapped): the nearest
+        # object of a similar size that lost its match IS this one - no ghost left behind
+        ox, oy = (o["box"][0] + o["box"][2]) / 2.0, (o["box"][1] + o["box"][3]) / 2.0
+        oa = max(1, (o["box"][2] - o["box"][0]) * (o["box"][3] - o["box"][1]))
+        best, bd = None, 1e18
+        for t in tracks:
+            if id(t) in used:
+                continue
+            ta = max(1, (t["box"][2] - t["box"][0]) * (t["box"][3] - t["box"][1]))
+            d = ((t["box"][0] + t["box"][2]) / 2.0 - ox) ** 2 + ((t["box"][1] + t["box"][3]) / 2.0 - oy) ** 2
+            if 1 / 3.0 < ta / float(oa) < 3 and d < bd:
+                best, bd = t, d
+        if best is None:
+            best = {"box": list(o["box"]), "counts": [], "parts": {}, "hits": 0, "miss": 0}
+            tracks.append(best)
+        else:                                       # a jump: start its history again
+            best["counts"], best["parts"], best["hits"] = [], {}, max(1, best["hits"])
+        used.add(id(best))
+        best["box"] = list(o["box"])
+        best["poly"] = o.get("poly")
+        best["counts"] = [o["found"]]
+        best["parts"][o["found"]] = o["parts"]
+        best["hits"] += 1
+        best["miss"] = 0
+    for t in tracks:
+        if id(t) not in used:
+            t["miss"] += 1
+    tracks[:] = [t for t in tracks if t["miss"] <= hold]
+    out = []
+    for t in sorted(tracks, key=lambda t: (t["box"][0], t["box"][1])):
+        if t["hits"] < 2:                     # one frame is not an object yet (a hand passing)
+            continue
+        c = t["counts"]
+        found = max(set(c), key=lambda n: (c.count(n), len(c) - 1 - c[::-1].index(n)))
+        o = {"box": [int(round(v)) for v in t["box"]], "ok": parts_verdict(found, want, rule),
+             "found": found, "parts": t["parts"].get(found, [])}
+        if t.get("poly"):
+            o["poly"] = [[int(round(x)), int(round(y))] for x, y in t["poly"]]
+        out.append(o)
+    return out
 
 
 def drop_inner(items, cover=0.6):
@@ -1453,14 +1608,24 @@ def task_parts_check(crop, roi):
         parts = _detect_items(crop[b:d, a:c], roi.get("part_model"), p.get("part_class"))
         ok = parts_verdict(len(parts), want, rule)
         boxes = [[q["box"][0] + a, q["box"][1] + b, q["box"][2] + a, q["box"][3] + b] for q in parts]
-        seen.append({"box": [x1, y1, x2, y2], "ok": ok, "found": len(parts), "parts": boxes})
+        so = {"box": [x1, y1, x2, y2], "ok": ok, "found": len(parts), "parts": boxes}
+        if o.get("poly"):
+            so["poly"] = o["poly"]                  # AI #1 found it leaning: keep the slant
+        seen.append(so)
         counts.append(len(parts))
         col = (60, 180, 60) if ok else TESR_RED
-        cv2.rectangle(dbg, (x1, y1), (x2, y2), col, 2)
+        if o.get("poly"):
+            cv2.polylines(dbg, [np.array(o["poly"], np.int32)], True, col, 2, cv2.LINE_AA)
+        else:
+            cv2.rectangle(dbg, (x1, y1), (x2, y2), col, 2)
         for q in boxes:
             cv2.rectangle(dbg, (q[0], q[1]), (q[2], q[3]), (60, 180, 60), 1)
         _text(dbg, "%s %d/%d" % ("OK" if ok else "NG", len(parts), want),
               (x1, max(14, y1 - 5)), 0.55, col, 2)
+    window = 1 if _PARTS_STILL[0] else max(1, int(p.get("smooth", 5)))
+    hold = max(0, int(p.get("hold", DEFAULT_HOLD)))
+    seen = smooth_parts(roi["id"], seen, want, rule, window, hold)
+    counts = [s["found"] for s in seen]
     _PARTS_SEEN[roi["id"]] = {"size": (W, H), "objects": seen, "want": want}
     n_ok = sum(1 for s in seen if s["ok"])
     result = "none" if not seen else ("OK" if n_ok == len(seen) else "NG")
@@ -1489,7 +1654,8 @@ def draw_parts(frame, roi):
     big = max(0.6, min(1.4, h / 700.0))
     for o in seen["objects"]:
         x1, y1, x2, y2 = o["box"]
-        q = crop_to_frame([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], roi["rect"], w, h, cw, ch)
+        corners = o.get("poly") or [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]   # rotated box if AI #1 gave one
+        q = crop_to_frame(corners, roi["rect"], w, h, cw, ch)
         col = (60, 180, 60) if o["ok"] else TESR_RED
         cv2.polylines(frame, [q.astype(np.int32)], True, col, 3, cv2.LINE_AA)
         for b in o["parts"]:
@@ -3358,6 +3524,7 @@ def run_folder(cfg, args):
     """
     cam = pick_camera(cfg, args.camera_id)
     rt = cfg["runtime"]
+    _PARTS_STILL[0] = True
     rois = [r for r in cam.get("rois", []) if r.get("enabled", True)
             and r.get("task") not in FRAME_TASKS]
     files = sorted(f for f in os.listdir(args.image) if f.lower().endswith(IMG_EXT))
