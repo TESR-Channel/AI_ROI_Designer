@@ -18,7 +18,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGE = os.path.join(ROOT, "index.html")
 BLOCKS = [("runnerSrc", os.path.join(ROOT, "runner", "tesr_vision_runner.py")),
-          ("lineSrc", os.path.join(ROOT, "runner", "tesr_line_engine.py"))]
+          ("lineSrc", os.path.join(ROOT, "runner", "tesr_line_engine.py")),
+          # not Python, but carried the same way: the Node-RED dashboard flow the export adds
+          ("dashFlowSrc", os.path.join(ROOT, "node-red", "vision_dashboard_flow.json"))]
 
 
 def read(path):
