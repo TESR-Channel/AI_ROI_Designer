@@ -51,7 +51,7 @@ def node(id_, type_, **kw):
 
 CAMERA = r"""<style>
 .tv-cam { position: relative; width: 100%; }
-.tv-cam img { width: 100%; border-radius: 10px; display: block; }
+.tv-cam img { width: 100%; height: 500px; object-fit: contain; background: #0f172a; border-radius: 10px; display: block; }
 .tv-wait { padding: 70px 10px; text-align: center; opacity: .65; font-size: 15px; line-height: 1.7; }
 .tv-badge { position: absolute; top: 10px; left: 10px; padding: 3px 12px; border-radius: 14px;
             font-size: 13px; font-weight: 700; color: #fff; background: #16a34a; }
@@ -123,7 +123,7 @@ LAST_NG = r"""<div style="text-align:center">
   <div ng-if="!msg.payload || !msg.payload.time" style="padding:30px 0; opacity:.6">ยังไม่มี NG</div>
   <div ng-if="msg.payload && msg.payload.time">
     <img ng-if="msg.payload.pic" ng-src="data:image/jpeg;base64,{{msg.payload.pic}}"
-         style="width:100%; border-radius:10px; border:4px solid #dc2626; display:block">
+         style="width:100%; height:240px; object-fit:contain; background:#0f172a; border-radius:10px; border:4px solid #dc2626; display:block; box-sizing:border-box">
     <div style="font-size:20px; font-weight:700; color:#dc2626; margin-top:6px">
       NG {{msg.payload.found}} / {{msg.payload.expect}} · {{msg.payload.roi}}</div>
     <div style="font-size:13px; opacity:.7">{{msg.payload.time}}</div>
