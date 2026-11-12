@@ -881,6 +881,7 @@ with 4, a tray of 30 cups. One region holds two detectors.
 | AI #2 + class | the detector that finds the parts inside one cut-out object (`screw`) |
 | count, rule | how many parts make it OK — exactly (`eq`) or at least (`min`) |
 | pad | margin added round each object before it is cut out (0.1 = 10%). Use the margin the AI Vision Trainer's ✂ Crop boxes used when AI #2's photos were made |
+| smooth | live camera / video only (v1.11.0): each object is followed over the last N frames — its OK/NG is the most common count of those frames and its box is averaged, so a detector that misses a screw for one frame no longer flips OK 4/4 ↔ NG 3/4. 1 = off, default 5. Pictures in `--image FOLDER` mode always stand alone |
 
 The region itself is where to look for objects — **Use the whole picture** sets it to the full
 frame. Boxes from AI #1 lying mostly inside a surer box are dropped (the same object seen twice).
@@ -889,6 +890,13 @@ The published value is a dict:
 ```json
 {"result": "NG", "objects": 1, "ok": 0, "ng": 1, "found": [7], "expect": 8}
 ```
+
+**Rotated boxes (v1.11.0).** When AI #1 is a rotated-box model — an Ultralytics `yolov8n-obb`
+export or an AI Vision Trainer model trained on slanted labels (both say `task: obb` in the
+`.onnx` metadata) — the object is drawn with a box that leans with it, in the browser and on the
+device. AI #2 still gets the upright cut-out around it (plus `pad`), the same picture the
+Trainer's ✂ Crop boxes made for its training. Any `yolo_detect` region reads such models too;
+each item then carries `poly` (4 corners) next to its upright `box`.
 
 `result` is `none` when no object is in view. In the browser, load several pictures at once and
 step through them with ◀ ▶ (or the arrow keys): every region is read again on each picture.
