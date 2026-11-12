@@ -227,6 +227,12 @@ python tesr_vision_runner.py --config config.json --headless
 * `logs/results.csv` — timestamp, camera, roi, key, value, conf
 * `logs/results.jsonl` — one event per line, easy to load into a database
 * MQTT — topic `<prefix>/<camera_id>/<output_key>`, JSON payload, ready for Node-RED
+  * **Node-RED dashboard (v1.12.0):** every export carries `node-red/vision_dashboard_flow.json`. Install
+    `node-red-dashboard` + `node-red-contrib-aedes`, import the file, Deploy, then run
+    `python tesr_vision_runner.py --camera usb --source 0 --broker <Node-RED computer> --headless` and open
+    `http://<Node-RED computer>:1880/ui`: the live picture with the AI boxes (`<prefix>/<camera>/frame`, 4 per second),
+    the result now, OK / NG counts and yield (one part per visit), the last NG with its picture, the last 15 parts,
+    and a Reset counts button. Rebuild it with `python3 tools/make_dashboard_flow.py`.
 * Webhook — HTTP POST when a value changes (uses the standard library, nothing to install)
 * a snapshot image when a value changes, if enabled in Runtime
 

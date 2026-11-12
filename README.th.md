@@ -225,6 +225,11 @@ python tesr_vision_runner.py --config config.json --headless
 * `logs/results.csv` — timestamp, camera, roi, key, value, conf
 * `logs/results.jsonl` — 1 บรรทัด 1 เหตุการณ์ เหมาะกับการนำเข้า database
 * MQTT — topic `<prefix>/<camera_id>/<output_key>` payload เป็น JSON ต่อเข้า Node-RED ได้ทันที
+  * **Node-RED Dashboard (v1.12.0):** ทุก zip ที่ส่งออกมี `node-red/vision_dashboard_flow.json` — ติดตั้ง
+    `node-red-dashboard` + `node-red-contrib-aedes` → Import → Deploy → รัน
+    `python tesr_vision_runner.py --camera usb --source 0 --broker <เครื่อง Node-RED> --headless` → เปิด
+    `http://<เครื่อง Node-RED>:1880/ui` เห็นภาพสดพร้อมกรอบ AI ผลตอนนี้ นับ OK / NG + % ผ่าน (1 ชิ้นต่อการเข้ามาใต้กล้อง 1 ครั้ง)
+    NG ล่าสุดพร้อมรูป ประวัติ 15 ชิ้น และปุ่มเริ่มนับใหม่ · สร้างไฟล์ใหม่ด้วย `python3 tools/make_dashboard_flow.py`
 * Webhook — HTTP POST เมื่อค่าเปลี่ยน (ใช้ urllib ใน Python มาตรฐาน ไม่ต้องลงเพิ่ม)
 * ภาพ snapshot เมื่อค่าเปลี่ยน (เปิดใน Runtime)
 
